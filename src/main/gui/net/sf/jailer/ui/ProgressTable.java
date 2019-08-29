@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -34,6 +35,8 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTable;
@@ -79,6 +82,7 @@ public class ProgressTable extends JTable {
 		public int row, column;
 		public List<CellInfo> parents;
 		public boolean inProgress = false;
+		public boolean hasSelectedChild = false;
 	};
 
 	/**
@@ -91,7 +95,29 @@ public class ProgressTable extends JTable {
 	 */
 	private Set<CellInfo> selectedCells = new HashSet<CellInfo>();
 	private String selectedTableName = null;
-
+	
+	private void setSelectedTableName(String tableName) {
+		selectedTableName = tableName;
+		for (List<CellInfo> cL : cellInfos) {
+			for (CellInfo cellInfo : cL) {
+				cellInfo.hasSelectedChild = false;
+			}
+		}
+		if (tableName != null) {
+			for (List<CellInfo> cL : cellInfos) {
+				for (CellInfo cellInfo : cL) {
+					if (tableName.contentEquals(cellInfo.tableName)) {
+						if (cellInfo.parents != null) {
+							for (CellInfo p: cellInfo.parents) {
+								p.hasSelectedChild = true;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
 	/**
 	 * Total number of collected rows.
 	 */
@@ -101,41 +127,71 @@ public class ProgressTable extends JTable {
 	 * Cell render components.
 	 */
 	private final JPanel cellPanel = new JPanel();
+	private final JPanel layerdPane = new JPanel();
 	private final JLabel tableRender = new JLabel("");
 	private final JLabel numberRender = new JLabel("");
+	private final JLabel iconRender = new JLabel(" ");
+	private final Icon scaledSourceIcon;
 	
 	/** Creates new table */
 	public ProgressTable() {
 		setShowGrid(false);
 		setSurrendersFocusOnKeystroke(true);
 		
+		scaledSourceIcon = UIUtil.scaleIcon(iconRender, sourceIcon, 1.4);
+		
 		tableRender.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
 		numberRender.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
 		cellPanel.setLayout(new GridBagLayout());
+		layerdPane.setLayout(new GridBagLayout());
 		GridBagConstraints gridBagConstraints = new GridBagConstraints();
 		gridBagConstraints.gridx = 1;
 		gridBagConstraints.gridy = 1;
 		gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
 		gridBagConstraints.anchor = java.awt.GridBagConstraints.SOUTH;
-		gridBagConstraints.weightx = 1.0;
-		gridBagConstraints.weighty = 1.0;
+		gridBagConstraints.weightx = 0;
+		gridBagConstraints.weighty = 0;
 		cellPanel.add(tableRender, gridBagConstraints);
 		gridBagConstraints = new GridBagConstraints();
 		gridBagConstraints.gridx = 1;
 		gridBagConstraints.gridy = 2;
 		gridBagConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
 		gridBagConstraints.anchor = java.awt.GridBagConstraints.NORTH;
-		gridBagConstraints.weightx = 1.0;
-		gridBagConstraints.weighty = 1.0;
+		gridBagConstraints.weightx = 0;
+		gridBagConstraints.weighty = 0;
 		cellPanel.add(numberRender, gridBagConstraints);
-				
+		
+		gridBagConstraints = new GridBagConstraints();
+		gridBagConstraints.gridx = 0;
+		gridBagConstraints.gridy = 1;
+		gridBagConstraints.gridheight = 2;
+		gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
+		gridBagConstraints.anchor = java.awt.GridBagConstraints.EAST;
+		gridBagConstraints.weightx = 0;
+		gridBagConstraints.weighty = 0;
+		cellPanel.add(iconRender, gridBagConstraints);
+		
+		gridBagConstraints = new GridBagConstraints();
+		gridBagConstraints.gridx = 2;
+		gridBagConstraints.gridy = 1;
+		gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
+		gridBagConstraints.anchor = java.awt.GridBagConstraints.NORTH;
+		gridBagConstraints.weightx = 0;
+		gridBagConstraints.weighty = 0;
+		layerdPane.add(cellPanel, gridBagConstraints);
+
+//		layerdPane.setLayer(cellPanel, javax.swing.JLayeredPane.FRAME_CONTENT_LAYER);
+//		layerdPane.setLayer(iconRender, javax.swing.JLayeredPane.PALETTE_LAYER);
+
 		tableRender.setOpaque(true);
 		numberRender.setOpaque(true);
+		iconRender.setOpaque(true);
+		cellPanel.setOpaque(true);
 		setRowHeight(getRowHeight() * 3);
 
 		final Border defaultBorder = cellPanel.getBorder();
-		final Border selBorder = BorderFactory.createLineBorder(Color.BLACK, 2);
-		
+		final Border selBorder = BorderFactory.createLineBorder(Color.BLACK, 1);
+
 		setDefaultRenderer(Object.class, new TableCellRenderer() {
 			private Font font = new JLabel("normal").getFont();
 			private Font normal = new Font(font.getName(), font.getStyle() & ~Font.BOLD, font.getSize());
@@ -148,18 +204,22 @@ public class ProgressTable extends JTable {
 				boolean fontIsSet = false;
 				tableRender.setForeground(Color.BLACK);
 				numberRender.setForeground(Color.BLACK);
-				cellPanel.setToolTipText(null);
-				cellPanel.setBorder(defaultBorder);
+				JPanel outer = layerdPane;
+				outer.setToolTipText(null);
+				outer.setBorder(defaultBorder);
 				if (value instanceof CellInfo) {
 					CellInfo cellInfo = (CellInfo) value;
 					
+					iconRender.setIcon(null);
 					if (cellInfo.tableName.equals(selectedTableName)) {
-						cellPanel.setBorder(selBorder);
+						outer.setBorder(selBorder);
+					} else if (cellInfo.hasSelectedChild) {
+						iconRender.setIcon(scaledSourceIcon);
 					}
 					
 					tableRender.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
 					tableRender.setText(cellInfo.tableName);
-					cellPanel.setToolTipText(cellInfo.tableName);
+					outer.setToolTipText(cellInfo.tableName);
 					if (selectedCells.contains(cellInfo)) {
 						numberRender.setFont(bold);
 						tableRender.setFont(bold);
@@ -196,6 +256,7 @@ public class ProgressTable extends JTable {
 					tableRender.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
 					tableRender.setText(" " + value);
 					numberRender.setText("");
+					iconRender.setIcon(null);
 				}
 				if (!fontIsSet) {
 					numberRender.setFont(kursiv);
@@ -203,8 +264,9 @@ public class ProgressTable extends JTable {
 				}
 				tableRender.setBackground(color);
 				numberRender.setBackground(color);
-				cellPanel.setBackground(color);
-				return cellPanel;
+				outer.setBackground(color);
+				iconRender.setBackground(color);
+				return outer;
 			}
 		});
 
@@ -219,7 +281,7 @@ public class ProgressTable extends JTable {
 					if (o instanceof CellInfo) {
 						CellInfo cellInfo = (CellInfo) o;
 						selectedCells.clear();
-						selectedTableName = cellInfo.tableName;
+						setSelectedTableName(cellInfo.tableName);
 						multiSelection = false;
 						selectCell(cellInfo);
 						repaint();
@@ -270,7 +332,7 @@ public class ProgressTable extends JTable {
 	public void selectAllCells(String tableName) {
 		multiSelection = true;
 		selectedCells.clear();
-		selectedTableName = tableName;
+		setSelectedTableName(tableName);
 		for (List<CellInfo> cL : cellInfos) {
 			for (CellInfo cellInfo : cL) {
 				if (cellInfo != null) {
@@ -349,7 +411,6 @@ public class ProgressTable extends JTable {
 		
 		boolean isVisible = r.y <= visible.y + visible.height;
 		return isVisible;
-//		return visible.y <= r.y && visible.y + visible.height >= r.y + r.height;
 	}
 
 	/**
@@ -396,7 +457,7 @@ public class ProgressTable extends JTable {
 				}
 				if (!f) {
 					selectedCells.clear();
-					selectedTableName = null;
+					setSelectedTableName(null);
 				}
 			}
 		}
@@ -646,6 +707,9 @@ public class ProgressTable extends JTable {
 	private double fitness(List<CellInfo> row, int maxParentRow) {
 		double f = 0;
 		int conflictCount[] = new int[MAX_TABLES_PER_LINE];
+		int lines = (int) Math.ceil(row.size() / (double) MAX_TABLES_PER_LINE);
+		int minX[] = new int[lines];
+		int maxX[] = new int[lines];
 
 		for (int x = row.size() - 1; x >= 0; --x) {
 			CellInfo cellInfo = row.get(x);
@@ -654,14 +718,27 @@ public class ProgressTable extends JTable {
 //			}
 			if (cellInfo != null && cellInfo.parents != null) {
 				for (CellInfo parent : cellInfo.parents) {
-					double xabs = (x % MAX_TABLES_PER_LINE) - parent.column;
+					int x0 = x % MAX_TABLES_PER_LINE;
+					int y0 = x / MAX_TABLES_PER_LINE;
+					double xabs = x0 - parent.column;
 					if (xabs == 0.0) {
 						f += MAX_TABLES_PER_LINE * MAX_TABLES_PER_LINE * conflictCount[parent.column]++;
 					}
-					double yabs = (x / MAX_TABLES_PER_LINE) + maxParentRow - parent.row;
+					double yabs = y0 + maxParentRow - parent.row;
 					f += xabs * xabs + yabs * yabs / 10;
+					if (y0 < lines) {
+						if (minX[y0] == 0 || minX[y0] >= x0) {
+							minX[y0] = x0 + 1;
+						}
+						if (maxX[y0] < x0) {
+							maxX[y0] = x0;
+						}
+					}
 				}
 			}
+		}
+		for (int y = 0; y < lines; ++y) {
+			f -= (maxX[y] - minX[y]) / (double) MAX_TABLES_PER_LINE;
 		}
 		return f;
 	}
@@ -691,8 +768,8 @@ public class ProgressTable extends JTable {
 	 *            The y location of the "head" of the arrow
 	 */
 	private void drawArrow(Graphics2D g, int x, int y, int xx, int yy) {
-		float arrowWidth = 6.0f;
-		float theta = 0.423f;
+		float arrowWidth = 8.0f;
+		float theta = 0.623f;
 		int[] xPoints = new int[3];
 		int[] yPoints = new int[3];
 		float[] vecLine = new float[2];
@@ -702,12 +779,33 @@ public class ProgressTable extends JTable {
 		float ta;
 		float baseX, baseY;
 
+		int mx1, my1;
+		int mx2, my2;
+		
+		if (xx < x) {
+			mx1 = yy - y;
+			my1 = x - xx;
+			mx2 = y - yy;
+			my2 = xx - x;
+		} else {
+			mx1 = y - yy;
+			my1 = xx - x;
+			mx2 = yy - y;
+			my2 = x - xx;
+		}
+		double f = 0.03;
+		mx1 = (int) (mx1 * f + (x + xx) * 0.5);
+		my1 = (int) (my1 * f + (y + yy) * 0.5);
+		f = 0.04;
+		mx2 = (int) (mx2 * f + (x + xx) * 0.5);
+		my2 = (int) (my2 * f + (y + yy) * 0.5);
+
 		xPoints[0] = xx;
 		yPoints[0] = yy;
 
 		// build the line vector
-		vecLine[0] = (float) xPoints[0] - x;
-		vecLine[1] = (float) yPoints[0] - y;
+		vecLine[0] = (float) xPoints[0] - (x == xx? x : mx2);
+		vecLine[1] = (float) yPoints[0] - (x == xx? y : my2);
 
 		// build the arrow base vector - normal to the line
 		vecLeft[0] = -vecLine[1];
@@ -728,7 +826,14 @@ public class ProgressTable extends JTable {
 		xPoints[2] = (int) (baseX - th * vecLeft[0]);
 		yPoints[2] = (int) (baseY - th * vecLeft[1]);
 
-		g.drawLine(x, y, (int) baseX, (int) baseY);
+		if (x == xx) {
+			g.drawLine(x, y + 2, (int) baseX, (int) baseY);
+		} else {
+			Path2D.Double path = new Path2D.Double();
+			path.moveTo(x, y + 4);
+			path.curveTo(mx1, my1, mx2, my2, (int) baseX, (int) baseY);
+			g.draw(path);
+		}
 		g.fillPolygon(xPoints, yPoints, 3);
 	}
 
@@ -747,7 +852,7 @@ public class ProgressTable extends JTable {
 			for (int r = 0; r < getRowCount(); r++) {
 				TableCellRenderer renderer = getCellRenderer(r, vColIndex);
 				Component comp = renderer.getTableCellRendererComponent(this, getValueAt(r, vColIndex), false, false, r, vColIndex);
-				if (comp != cellPanel || tableRender.getText().trim().length() > 0) {
+				if (comp != layerdPane || tableRender.getText().trim().length() > 0) {
 					isEmpty = false;
 					break;
 				}
@@ -759,6 +864,18 @@ public class ProgressTable extends JTable {
 				w = 10000;
 			}
 			col.setMaxWidth(w);
+		}
+	}
+
+	private static ImageIcon sourceIcon;
+	{
+		String dir = "/net/sf/jailer/ui/resource";
+		
+		// load images
+		try {
+			sourceIcon = new ImageIcon(getClass().getResource(dir + "/source.png"));
+		} catch (Exception e) {
+			e.printStackTrace();
 		}
 	}
 

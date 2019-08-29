@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -89,6 +90,11 @@ public class DataModel {
 	 */
 	public Map<String, Association> namedAssociations = new TreeMap<String, Association>();
 	
+	/**
+	 * Set of names of associations for which no decision has been made.
+	 */
+	public Set<String> decisionPending = new HashSet<String>();
+
 	/**
 	 * The restriction model.
 	 */
@@ -298,7 +304,7 @@ public class DataModel {
 	 * @param knownIdentifiers 
 	 */
 	public DataModel(ExecutionContext executionContext) throws IOException {
-		this(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(), executionContext, false, null);
+		this(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(executionContext), executionContext, false, null);
 	}
 
 	/**
@@ -307,7 +313,7 @@ public class DataModel {
 	 * @param knownIdentifiers 
 	 */
 	public DataModel(KnownIdentifierMap knownIdentifiers, ExecutionContext executionContext) throws IOException {
-		this(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(), executionContext, false, knownIdentifiers);
+		this(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(executionContext), executionContext, false, knownIdentifiers);
 	}
 
 	/**
@@ -315,7 +321,7 @@ public class DataModel {
 	 * and builds the relational data model.
 	 */
 	public DataModel(Map<String, String> sourceSchemaMapping, ExecutionContext executionContext, boolean failOnMissingTables) throws IOException {
-		this(null, null, sourceSchemaMapping, null, new PrimaryKeyFactory(), executionContext, failOnMissingTables, null);
+		this(null, null, sourceSchemaMapping, null, new PrimaryKeyFactory(executionContext), executionContext, failOnMissingTables, null);
 	}
 
 	/**
@@ -337,7 +343,7 @@ public class DataModel {
 	 * @param additionalAssociationsFile association file to read too
 	 */
 	public DataModel(String additionalTablesFile, String additionalAssociationsFile, ExecutionContext executionContext) throws IOException {
-		this(additionalTablesFile, additionalAssociationsFile, new HashMap<String, String>(), null, new PrimaryKeyFactory(), executionContext, false, null);
+		this(additionalTablesFile, additionalAssociationsFile, new HashMap<String, String>(), null, new PrimaryKeyFactory(executionContext), executionContext, false, null);
 	}
 
 	/**
@@ -348,7 +354,7 @@ public class DataModel {
 	 * @param additionalAssociationsFile association file to read too
 	 */
 	public DataModel(String additionalTablesFile, String additionalAssociationsFile, Map<String, String> sourceSchemaMapping, LineFilter assocFilter, ExecutionContext executionContext) throws IOException {
-		this(additionalTablesFile, additionalAssociationsFile, sourceSchemaMapping, assocFilter, new PrimaryKeyFactory(), executionContext, false, null);
+		this(additionalTablesFile, additionalAssociationsFile, sourceSchemaMapping, assocFilter, new PrimaryKeyFactory(executionContext), executionContext, false, null);
 	}
 
 	/**
@@ -380,9 +386,10 @@ public class DataModel {
 
 			// tables
 			File tabFile = new File(getTablesFile(executionContext));
-			InputStream nTablesFile = openModelFile(tabFile, executionContext);
+			StringBuilder resourceName = new StringBuilder();
+			InputStream nTablesFile = openModelFile(tabFile, resourceName, false, executionContext);
 			if (failOnMissingTables && nTablesFile == null) {
-				throw new RuntimeException("Datamodel not found: " + executionContext.getDataModelURL());
+				throw new RuntimeException("Data model not found: " + resourceName);
 			}
 			CsvFile tablesFile = new CsvFile(nTablesFile, null, tabFile.getPath(), null);
 			List<CsvFile.Line> tableList = new ArrayList<CsvFile.Line>(tablesFile.getLines());
@@ -414,7 +421,7 @@ public class DataModel {
 					}
 				}
 				String mappedSchemaTableName = SqlUtil.mappedSchema(sourceSchemaMapping, tabName);
-				Table table = new Table(mappedSchemaTableName, primaryKeyFactory.createPrimaryKey(pk), defaultUpsert, excludeFromDeletion.contains(mappedSchemaTableName));
+				Table table = new Table(mappedSchemaTableName, primaryKeyFactory.createPrimaryKey(pk, mappedSchemaTableName), defaultUpsert, excludeFromDeletion.contains(mappedSchemaTableName));
 				table.setAuthor(line.cells.get(j + 1));
 				table.setOriginalName(line.cells.get(0));
 				if (tables.containsKey(mappedSchemaTableName)) {
@@ -461,26 +468,35 @@ public class DataModel {
 						} catch (Exception e) {
 							// ignore
 						}
-						// order columns
-						if (!columnOrderPrio.isEmpty()) {
-							Collections.sort(columns, new Comparator<Column>() {
-								@Override
-								public int compare(Column a, Column b) {
-									ColumnOrderPriority prioA = columnOrderPrio.get(Quoting.normalizeIdentifier(a.name));
-									ColumnOrderPriority prioB = columnOrderPrio.get(Quoting.normalizeIdentifier(b.name));
-									if (prioA != prioB) {
-										if (prioA == ColumnOrderPriority.HI) {
-											return -1;
-										} else if (prioA == ColumnOrderPriority.LO) {
-											return 1;
-										} else {
-											return prioB == ColumnOrderPriority.HI? 1 : -1;
-										}
-									}
-									return 0;
-								}
-							});
+					}
+					// order columns
+					if (!columnOrderPrio.isEmpty()) {
+						final Map<Column, ColumnOrderPriority> prio = new IdentityHashMap<>();
+						String prefix = line.cells.get(0).trim().length() == 0? "" : (line.cells.get(0).trim() + ".");
+						for (Column column: columns) {
+							ColumnOrderPriority columnOrderPriority = columnOrderPrio.get(prefix + Quoting.normalizeIdentifier(column.name));
+							if (columnOrderPriority == null) {
+								columnOrderPriority = columnOrderPrio.get(Quoting.normalizeIdentifier(column.name));
+							}
+							prio.put(column, columnOrderPriority);
 						}
+						Collections.sort(columns, new Comparator<Column>() {
+							@Override
+							public int compare(Column a, Column b) {
+								ColumnOrderPriority prioA = prio.get(a);
+								ColumnOrderPriority prioB = prio.get(b);
+								if (prioA != prioB) {
+									if (prioA == ColumnOrderPriority.HI) {
+											return -1;
+									} else if (prioA == ColumnOrderPriority.LO) {
+										return 1;
+									} else {
+										return prioB == ColumnOrderPriority.HI? 1 : -1;
+									}
+								}
+								return 0;
+							}
+						});
 					}
 					Table table = tables.get(SqlUtil.mappedSchema(sourceSchemaMapping, line.cells.get(0)));
 					if (table != null) {
@@ -870,7 +886,7 @@ public class DataModel {
 		private static final long serialVersionUID = 4523935351640139649L;
 		public final Table table;
 		public NoPrimaryKeyException(Table table, String message) {
-			super("Table '" + table.getName() + "' " + message);
+			super((table == null? "Subject table " : ("Table '" + table.getName() + "' ")) + message);
 			this.table = table;
 		}
 		public NoPrimaryKeyException(Table table) {
@@ -885,21 +901,10 @@ public class DataModel {
 	 * @param subject the subject
 	 * @throws NoPrimaryKeyException if a table has no primary key
 	 */
-	public Set<Table> checkForPrimaryKey(Set<Table> subjects, boolean forDeletion, boolean hasRowID) throws NoPrimaryKeyException {
+	public Set<Table> checkForPrimaryKey(Set<Table> subjects, boolean hasRowID) throws NoPrimaryKeyException {
 		Set<Table> checked = new HashSet<Table>();
 		for (Table subject: subjects) {
 			Set<Table> toCheck = new HashSet<Table>(subject.closure(checked, true));
-			if (forDeletion) {
-				Set<Table> border = new HashSet<Table>();
-				for (Table table: toCheck) {
-					for (Association a: table.associations) {
-						if (!a.reversalAssociation.isIgnored()) {
-							border.add(a.destination);
-						}
-					}
-				}
-				toCheck.addAll(border);
-			}
 			for (Table table: toCheck) {
 				if (!hasRowID) {
 					if (table.primaryKey.getColumns().isEmpty()) {
@@ -950,15 +955,27 @@ public class DataModel {
 		return parameters;
 	}
 
-	private static InputStream openModelFile(File file, ExecutionContext executionContext) {
+	private static InputStream openModelFile(File file, ExecutionContext executionContext) throws IOException {
+		return openModelFile(file, new StringBuilder(), false, executionContext);
+	}
+
+	private static InputStream openModelFile(File file, StringBuilder resourceName, boolean failOnIOException, ExecutionContext executionContext) throws IOException {
 		try {
 			URL dataModelURL = executionContext.getDataModelURL();
 			URI uri = dataModelURL.toURI();
-			URI resolved = new URI(uri.toString() + file.getName()); // uri.resolve(file.getName());
+			String uriAsString = uri.toString();
+			if (!uriAsString.endsWith("/")) {
+				uriAsString += "/";
+			}
+			URI resolved = new URI(uriAsString + file.getName()); // uri.resolve(file.getName());
+			resourceName.append(resolved.toURL().toString());
 			return resolved.toURL().openStream();
 		} catch (MalformedURLException e) {
 			throw new RuntimeException(e);
 		} catch (IOException e) {
+			if (failOnIOException) {
+				throw e;
+			}
 			return null;
 		} catch (URISyntaxException e) {
 			throw new RuntimeException(e);
@@ -1044,10 +1061,11 @@ public class DataModel {
 		
 		out.println();
 		out.println(CsvFile.BLOCK_INDICATOR + "known");
+		out.println("# known association; decision pending");
 		if (!restrictionDefinitions.isEmpty()) {
 			for (Association a: namedAssociations.values()) {
 				if (!a.reversed) {
-					out.println(CsvFile.encodeCell(a.getName()));
+					out.println(CsvFile.encodeCell(a.getName()) + "; " + CsvFile.encodeCell(decisionPending.contains(a.getName())? "pending" : ""));
 				}
 			}
 		}
@@ -1057,7 +1075,7 @@ public class DataModel {
 		out.println(JailerVersion.VERSION);
 		out.close();
 	}
-	
+
 	/**
 	 * Saves xml mappings.
 	 * 

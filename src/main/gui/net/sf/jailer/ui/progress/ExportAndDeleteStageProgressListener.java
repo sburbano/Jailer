@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,13 @@ package net.sf.jailer.ui.progress;
 
 import java.util.Set;
 
-import javax.swing.SwingUtilities;
-
 import net.sf.jailer.datamodel.DataModel;
 import net.sf.jailer.datamodel.ModelElement;
 import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.progress.ProgressListener;
 import net.sf.jailer.ui.ProgressPanel;
 import net.sf.jailer.ui.ProgressTable;
+import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.util.CancellationException;
 
 /**
@@ -32,7 +31,7 @@ import net.sf.jailer.util.CancellationException;
  * 
  * @author Ralf Wisser
  */
-public class ExportAndDeleteStageProgressListener implements ProgressListener {
+public abstract class ExportAndDeleteStageProgressListener implements ProgressListener {
 
 	private final SingleStageProgressListener exportProgressListener;
 	private final SingleStageProgressListener deleteProgressListener;
@@ -46,9 +45,19 @@ public class ExportAndDeleteStageProgressListener implements ProgressListener {
 	 *            table showing collected rows
 	 * @param targetSchemaSet 
 	 */
-	public ExportAndDeleteStageProgressListener(final ProgressTable exportProgressTable, final ProgressTable deleteProgressTable, final ProgressPanel progressPanel, DataModel dataModel, final boolean confirm, Set<String> targetSchemaSet) {
-		this.exportProgressListener = new SingleStageProgressListener(exportProgressTable, progressPanel, dataModel, confirm, targetSchemaSet, true);
-		this.deleteProgressListener = new SingleStageProgressListener(deleteProgressTable, progressPanel, dataModel, confirm, targetSchemaSet, false);
+	public ExportAndDeleteStageProgressListener(final ProgressTable exportProgressTable, final ProgressTable deleteProgressTable, final ProgressPanel progressPanel, DataModel dataModel, final boolean confirm, Set<String> targetSchemaSet, boolean checkPK) {
+		this.exportProgressListener = new SingleStageProgressListener(exportProgressTable, progressPanel, dataModel, confirm, targetSchemaSet, true, checkPK) {
+			@Override
+			protected void validatePrimaryKeys() {
+				ExportAndDeleteStageProgressListener.this.validatePrimaryKeys();
+			}
+		};
+		this.deleteProgressListener = new SingleStageProgressListener(deleteProgressTable, progressPanel, dataModel, confirm, targetSchemaSet, false, checkPK) {
+			@Override
+			protected void validatePrimaryKeys() {
+				ExportAndDeleteStageProgressListener.this.validatePrimaryKeys();
+			}
+		};
 		this.progressPanel = progressPanel;
 		currentProgressListener = exportProgressListener;
 	}
@@ -90,7 +99,7 @@ public class ExportAndDeleteStageProgressListener implements ProgressListener {
 	private synchronized void switchToDeleteTab() {
 		if (!switched && currentProgressListener == deleteProgressListener) {
 			switched = true;
-			SwingUtilities.invokeLater(new Runnable() {
+			UIUtil.invokeLater(new Runnable() {
 				@Override
 				public void run() {
 					progressPanel.switchToDeleteTab();
@@ -115,4 +124,6 @@ public class ExportAndDeleteStageProgressListener implements ProgressListener {
 		deleteProgressListener.stop();
 	}
 
+	protected abstract void validatePrimaryKeys();
+	
 }

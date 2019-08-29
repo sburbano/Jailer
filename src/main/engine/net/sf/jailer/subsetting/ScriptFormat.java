@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,11 +31,6 @@ public enum ScriptFormat {
 	 * Intra database export.
 	 */
 	INTRA_DATABASE("Schema in same database", "Intra Database Export - Receipt File", ".txt"),
-
-	/**
-	 * Template based XML.
-	 */
-	XML("XML", "XML Export", ".xml"),
 	
 	/**
 	 * DbUnit's FlatXmlDataSet format.
@@ -43,7 +38,12 @@ public enum ScriptFormat {
 	DBUNIT_FLAT_XML("DbUnit flat dataset", "DbUnit flat dataset Export", ".xml"),
 	
 	
-	LIQUIBASE_XML("Liquibase", "Liquibase Export", ".xml");
+	LIQUIBASE_XML("Liquibase", "Liquibase Export", ".xml"),
+
+	/**
+	 * Template based XML.
+	 */
+	XML("XML", "XML Export", ".xml");
 
 	/**
 	 * Constructor.

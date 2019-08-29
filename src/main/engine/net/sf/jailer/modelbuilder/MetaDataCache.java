@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -174,7 +174,7 @@ public class MetaDataCache {
 			
 			while (rs.next()) {
 				Object[] row = new Object[numCol];
-				for (int i = 1; i < numCol; ++i) {
+				for (int i = 1; i <= numCol; ++i) {
 					if (i >= 22 && DBMS.MSSQL.equals(session.dbms)) {
 						row[i - 1] = null;
 					} else {
@@ -194,7 +194,7 @@ public class MetaDataCache {
 				}
 				rowList.add(row);
 			}
-			metaDataCache.resultSetMetaData = new MemorizedResultSetMetaData(rsMetaData.getColumnCount(), names, types); 
+			metaDataCache.resultSetMetaData = new MemorizedResultSetMetaData(numCol, names, types); 
 			rs.close();
 
 			if (metaDataCache.cache.isEmpty()) {
@@ -252,7 +252,7 @@ public class MetaDataCache {
 					rowList.add(row);
 				}
 			});
-			if (rc == 0 && session.dbms != DBMS.ORACLE) {
+			if (rc == 0 && !DBMS.ORACLE.equals(session.dbms)) {
 				throw new SQLException("Nothing found. Fall back to JDBC meta data.");
 			}
 			_log.info(rc + " rows read");

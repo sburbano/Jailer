@@ -1,8 +1,131 @@
-8.1.3
+8.8.5
+  - https://github.com/Wisser/Jailer/issues/14
+    "[new feature] add command line options to bypass the data model selection dialog"
+  - https://github.com/Wisser/Jailer/issues/13
+    "Multiple table selection"
+
+8.8.4
+  - Fixed a bug that caused a Liquibase export not to work for Postgres TEXT columns.
+  - SQL Console didn't work with SQLite.
+  - Improved validation of CLI arguments.
+  - The "Upsert" statements are generated for more compact.
+  - Feature Request 65. https://sourceforge.net/p/jailer/feature-requests/65/
+  - Importing C/BLOBs did not work without write permission on the working directory.
+
+8.8.2
+  - The layout optimizer of the export progress dialog has been improved.
+  - The tutorial has been improved.
+  - Minor fixes and improvements.
+
+8.8.1
+  - New feature "Check Primary Keys" makes it possible to check the user-defined primary keys for uniqueness.
+  - A warning message appears if the number of collected rows differs from the number of exported ones.
+  - The performance of the preparation for the subsetting-process has been improved.
+  - Extraction models can now be loaded from the "Data Model Manager" dialog.
+  - It was not possible to pass user / password via cli when it starts with '-'
+  - Updated local database to H2 1.4.199.
+  - The fonts selection in the GUI has been standardized.
+  - Improved error handling in the data browser.
+    If the same error occurs multiple times because it affects multiple table browsers,
+    it will be displayed only once.
+
+8.7.8
+  - Fixed a bug that caused the creation of a delete script to generate syntactically incorrect SQL statements when a table without a primary key exists.
+
+8.7.5
+  - Fix for ticket 39 "Oracle queries are going failed". https://sourceforge.net/p/jailer/bugs/39/ 
+  - Minor bug fixes.
+
+8.7.3
+  - Fix: the working table scope "local" did not work correctly with PostgreSQL.
+  - Cursor-based result sets have been activated under PostgreSQL.
+    Retrieving the entire ResultSet at once led to out-of-memory errors.
+
+8.7.2
+  - Selected tables are automatically scrolled into the visible area of the display.
+  - Fix: not all associations between two visible tables were always visible.
+
+8.7.1
+  - SQL Console is now robust against outdated metadata.
+  - Fixed: Associations between visible tables were not always visible.
+
+8.7
+  - Modal dialogues were replaced by non-modal ones.
+  - Creation of the data model files has been revised.
+  - Execution plans for DB2 LUW.
+  - Fixed "ERROR: failed to find conversion function from unknown to text"
+    that could occur with PostgreSQL in connection with the "local database" scope. 
+
+8.6
+  - The data browser automatically reconnects when the connection is lost.
+  - Minor bug fixes.
+
+8.5.4
+  - The table from which the navigation starts can now be changed at any time in the data browser.
+  - Improved data browser performance.
+
+8.5.3
+  - Column order in the display can be defined not only globally but also for each table.
+
+8.5.2
+  - Minor bug fixes.
+
+8.5.1
+  - Undo/Redo functionality.
+  - improved HiDPI Support.
+
+8.4.1
+  - Transactional import did not roll back the transaction in case of an error.
+  - Fixed an error in the analysis of views.
+  - Minor bug fixes.
+
+8.3.1
+  - New "Model Migration Tool" allows you to easily find and edit the newly added associations
+    if the data model has been extended after the last change to this extraction model. 
+
+8.2.6
+  - Fixed "#37 PostreSQL: transactional execution"
+  - Fixed "#36 Data Export Dialog: Some settings are 'lost' between Exports"
+  - FR "#62 subsequent Analyze database, new links fate", only the new "parent-> detail" relationships will be disabled.
+  - FR "#61 Information about exported rows"
+  - Issue 10, "Export to SQLite - Boolean values", https://github.com/Wisser/Jailer/issues/10
+
+8.2.5
+  - Improved livelock prevention.
+  - [feature-requests:#61] "Information about exported rows"
+  - [bugs:#36] "Data Export Dialog: Some settings are 'lost' between Exports"
+  - Fixed NPE in "explain" feature.
+  - Minor bug fixes.
+
+8.2.4
+  - Implemented "#57 Analyze database convenience". UPK is formed exclusively for the tables related to the subjects.
+  - Implemented "#58 receipt += times"
+  - Fixed "#34 Possible Performance-Improvement in CellContentConverter.toSql"
+  - Fixed "#59 Retry Deadlock?"
+  - Automatic adjustment of the number of database connections.
+  - Improved error handling.
+  - URL of forum and manual pages on sourceforge have been corrected. 
+
+8.2.1
+  - Intra-database export: automatic fallback to MERGE on tables without PK has been removed.
+  - Increased SQL import performance + progress bar also for compressed files.
+  - Logging did not work if the working directory is read-only.
+  - Improved error handling.
+
+8.2
+  - Fixed "SQLite JDBC: inconsistent internal state" during database analysis.
+  - Fixed "#32 SQL analyzer: duplicate associations".
+  - Implemented "#51 Reduce transaction sizes"
+  - Implemented "#54 Number thousand separators"
+  - New option to set the isolation level.
+  - Bookmark feature in data browser.
+
+8.1.5
   - New export option "check primary keys" allows checking the validity of manually defined primary keys.
   - New export option "limit transaction sizes" reduces transaction sizes. (Feature request 51)
   - Improved indexing of working tables.
   - JSQLParser has been updated to version 1.3.
+  - Fix for bug 32 "SQL analyzer: duplicate associations" 
 
 8.1.1
   - Increased initial responsiveness of the SQL Console.

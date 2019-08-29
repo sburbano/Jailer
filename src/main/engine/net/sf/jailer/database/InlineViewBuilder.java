@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ public abstract class InlineViewBuilder implements Session.ResultSetReader {
 	 */
 	protected final String name;
 
-	private final StatementBuilder statementBuilder;
+	protected final StatementBuilder statementBuilder;
 
 	protected ResultSetMetaData resultSetMetaData = null;
 

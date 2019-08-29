@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
-import javax.swing.SwingUtilities;
 
 import org.apache.log4j.Logger;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
@@ -57,6 +56,7 @@ import net.sf.jailer.modelbuilder.ModelBuilder;
 import net.sf.jailer.ui.DbConnectionDialog;
 import net.sf.jailer.ui.QueryBuilderDialog;
 import net.sf.jailer.ui.QueryBuilderDialog.Relationship;
+import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.databrowser.BrowserContentPane;
 import net.sf.jailer.ui.databrowser.BrowserContentPane.LoadJob;
 import net.sf.jailer.ui.databrowser.Desktop.RowBrowser;
@@ -243,11 +243,13 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 	    	try {
 		    	final int tableNameColumnIndex = 3;
 		    	final Set<String> pkNames = Collections.synchronizedSet(new HashSet<String>());
-		    	final BrowserContentPane rb = new BrowserContentPane(datamodel.get(), null, "", session, null, null,
+		    	final BrowserContentPane rb = new BrowserContentPane(datamodel.get(), null, "", session, null,
 						null, null, new BrowserContentPane.RowsClosure(), false, false, executionContext) {
 		    		{
 		    			noSingleRowDetailsView = true;
 		    			rowsTableScrollPane.setWheelScrollingEnabled(true);
+		    			sortColumnsCheckBox.setVisible(false);
+		    			sortColumnsPanel.setVisible(false);
 		    		}
 		    		@Override
 		    		protected int getReloadLimit() {
@@ -280,7 +282,7 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 					protected void onContentChange(List<Row> rows, boolean reloadChildren) {
 					}
 					@Override
-					protected RowBrowser navigateTo(Association association, int rowIndex, Row row) {
+					protected RowBrowser navigateTo(Association association, List<Row> pRows) {
 						return null;
 					}
 					@Override
@@ -386,7 +388,7 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 						} catch (SQLException e) {
 							// ignore
 						}
-			    		SwingUtilities.invokeLater(new Runnable() {
+			    		UIUtil.invokeLater(new Runnable() {
 							@Override
 							public void run() {
 								LoadJob loadJob = rb.newLoadJob(metaDataDetails[0], null);
@@ -394,7 +396,7 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 					        	JComponent rTabContainer = rb.getRowsTableContainer();
 						    	detailsViews.put(cacheKey, rTabContainer);
 								final JTable rTab = rb.getRowsTable();
-								SwingUtilities.invokeLater(new Runnable() {
+								UIUtil.invokeLater(new Runnable() {
 									@Override
 									public void run() {
 										mdd.adjustRowsTable(rTab);
@@ -448,7 +450,7 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 					@Override
 					public void run() {
 						mdTable.getDDL();
-						SwingUtilities.invokeLater(doRun);
+						UIUtil.invokeLater(doRun);
 					}
 				});
 			} catch (InterruptedException e) {
@@ -499,7 +501,7 @@ public abstract class MetaDataDetailsPanel extends javax.swing.JPanel {
 						} catch (SQLException e) {
 							// ignore
 						}
-    	    			SwingUtilities.invokeLater(doRunGetConstraints);
+    	    			UIUtil.invokeLater(doRunGetConstraints);
     	    		}
     	    	}, 1);
     		}

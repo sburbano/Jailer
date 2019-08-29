@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -180,7 +180,7 @@ public class CsvFile {
 				while (row.size() < 100) {
 					row.add("");
 				}
-				Line cvsLine = new Line("line " + lineNr + ", " + csvFile.getName(), row);
+				Line cvsLine = new Line(csvFile.getName() + ", line " + lineNr, row);
 				if (filter == null || filter.accept(cvsLine)) {
 					rows.add(cvsLine);
 				}
@@ -229,7 +229,7 @@ public class CsvFile {
 				while (row.size() < 100) {
 					row.add("");
 				}
-				Line cvsLine = new Line("line " + lineNr + ", " + location, row);
+				Line cvsLine = new Line(location + ", " + "line " + lineNr, row);
 				if (filter == null || filter.accept(cvsLine)) {
 					rows.add(cvsLine);
 				}

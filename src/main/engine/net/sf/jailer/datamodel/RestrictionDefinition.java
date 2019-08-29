@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,7 +73,7 @@ public class RestrictionDefinition {
 	/**
 	 * Gets list of all restriction definition from {@link ExtractionModel}.
 	 * 
-	 * @param extractionnModel the extraction model
+	 * @param extractionModel the extraction model
 	 * @return all restriction definition from extractionModel 
 	 */
 	public static List<RestrictionDefinition> fromRestrictionModel(ExtractionModel extractionModel) {

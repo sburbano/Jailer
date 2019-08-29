@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,14 @@
  */
 package net.sf.jailer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 
 /**
- * Parser for {@link ExecutionContext}.
+ * Parser for {@link CommandLine}.
  * 
  * @author Ralf Wisser
  */
@@ -34,8 +37,32 @@ public class CommandLineParser {
 	public static CommandLine parse(String[] args, boolean silent) throws Exception {
 		CommandLine commandLine = new CommandLine();
 		try {
+			List<String> theArgs = new ArrayList<String>();
+			
+			final String ESC_PREFIX = "((!JAILER_MINUS_ESC!!)";
+
+			int i = 0;
+			while (i < args.length) {
+				String arg = args[i];
+				if ("-".equals(arg) && i < args.length - 1) {
+					theArgs.add(ESC_PREFIX + args[++i]);
+				} else {
+					theArgs.add(arg);
+				}
+				++i;
+			}
+
 			CmdLineParser cmdLineParser = new CmdLineParser(commandLine);
-			cmdLineParser.parseArgument(args);
+			cmdLineParser.parseArgument(theArgs.toArray(new String[0]));
+			List<String> escapedWords = new ArrayList<String>();
+			for (String arg: commandLine.arguments) {
+				if (arg.startsWith(ESC_PREFIX)) {
+					escapedWords.add(arg.substring(ESC_PREFIX.length()));
+				} else {
+					escapedWords.add(arg);
+				}
+			}
+			commandLine.arguments = escapedWords;
 			if (commandLine.arguments.isEmpty()) {
 				if (!silent) {
 					printUsage();
@@ -73,10 +100,10 @@ public class CommandLineParser {
 		System.out.println("    -where subject condition. Optional, overrides condition in extraction-model");
 		System.out.println("    -t prevents deletion of entities from 'tabu'-tables");
 		System.out.println();
-		System.out.println("  jailer create-ddl [-datamodel VAL] [-target-dbms <DBMS>] [-working-table-schema VAL] [-no-rowid]");
+		System.out.println("  jailer create-ddl [-datamodel VAL] [-target-dbms <DBMS>] [-working-table-schema VAL] [<extraction-model> -independent-working-tables] [-no-rowid]");
 		System.out.println("    creates the DDL for the working-tables and prints it to stdout");
 		System.out.println();
-		System.out.println("  jailer create-ddl <jdbc-driver-class> <db-URL> <db-user> <db-password> [-no-rowid]");
+		System.out.println("  jailer create-ddl <jdbc-driver-class> <db-URL> <db-user> <db-password> [<extraction-model> -independent-working-tables] [-no-rowid]");
 		System.out.println("    creates the DDL for the working-tables and executes it");
 		System.out.println();
 		System.out.println("  jailer build-model [-schema <schema>] <jdbc-driver-class> <db-URL> <db-user> <db-password>");

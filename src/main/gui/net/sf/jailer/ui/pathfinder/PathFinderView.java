@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -152,10 +152,10 @@ public abstract class PathFinderView extends javax.swing.JPanel {
         redoButton.setIcon(UIUtil.scaleIcon(this, rightIcon));
         
         if (jScrollPane1.getHorizontalScrollBar() != null) {
-        	jScrollPane1.getHorizontalScrollBar().setUnitIncrement(10);
+        	jScrollPane1.getHorizontalScrollBar().setUnitIncrement(16);
         }
         if (jScrollPane1.getVerticalScrollBar() != null) {
-        	jScrollPane1.getVerticalScrollBar().setUnitIncrement(10);
+        	jScrollPane1.getVerticalScrollBar().setUnitIncrement(16);
         }
         restoreHistory();
 		historyButton.setEnabled(false);

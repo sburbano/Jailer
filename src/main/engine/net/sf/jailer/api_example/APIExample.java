@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ import net.sf.jailer.database.BasicDataSource;
 import net.sf.jailer.subsetting.ScriptFormat;
 
 /**
- * Jailer API Example.  <br>
+ * Jailer API Example. <br>
  * 
- * Extracts some data from the "demo-scott" database
- * and imports it into another database "demo-scott-subset".
+ * Extracts some data from the "demo-scott-1.4" database
+ * and imports it into another database "demo-scott-subset-1.4".
  */
 public class APIExample {
 	
@@ -40,21 +40,21 @@ public class APIExample {
 	private static Subsetter subsetter = 
 		new Subsetter(
 			new BasicDataSource(
-					"org.h2.Driver", "jdbc:h2:demo-scott", "sa", "",
+					"org.h2.Driver", "jdbc:h2:" + new File("demo-scott-1.4").getAbsolutePath(), "sa", "",
 					POOL_SIZE,
-					new File("lib/h2-1.3.175.jar")),
+					new File("lib/h2-1.4.199.jar")),
 			null,
 			APIExample.class.getResource("Demo-Scott"),
-			APIExample.class.getResource("Demo-Scott.csv"),
+			APIExample.class.getResource("Demo-Scott.jm"),
 			ScriptFormat.SQL);
 	
 	// The importer
 	private static Importer importer =
 		new Importer(
 			new BasicDataSource(
-				"org.h2.Driver", "jdbc:h2:demo-scott-subset", "sa", "",
+				"org.h2.Driver", "jdbc:h2:" + new File("demo-scott-subset-1.4").getAbsolutePath(), "sa", "",
 				10,
-				new File("lib/h2-1.3.175.jar")));
+				new File("lib/h2-1.4.199.jar")));
 
 	/**
 	 * Exports data related with employee "SCOTT"

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package net.sf.jailer.ui.databrowser;
 
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -28,6 +29,7 @@ import java.awt.Image;
 import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.dnd.DropTarget;
@@ -41,15 +43,13 @@ import java.awt.event.AdjustmentEvent;
 import java.awt.event.AdjustmentListener;
 import java.awt.event.ComponentEvent;
 import java.awt.event.ComponentListener;
+import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowListener;
 import java.beans.PropertyVetoException;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.URI;
 import java.sql.SQLException;
@@ -62,24 +62,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.Vector;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.ComboBoxModel;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.InputMap;
-import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JInternalFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayeredPane;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -110,6 +110,7 @@ import net.sf.jailer.database.BasicDataSource;
 import net.sf.jailer.database.Session;
 import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.DataModel;
+import net.sf.jailer.datamodel.PrimaryKeyFactory;
 import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.modelbuilder.JDBCMetaDataBasedModelElementFinder;
 import net.sf.jailer.modelbuilder.ModelBuilder;
@@ -120,8 +121,8 @@ import net.sf.jailer.ui.AssociationListUI.AssociationModel;
 import net.sf.jailer.ui.AssociationListUI.DefaultAssociationModel;
 import net.sf.jailer.ui.AutoCompletion;
 import net.sf.jailer.ui.BrowserLauncher;
+import net.sf.jailer.ui.CLIPanel;
 import net.sf.jailer.ui.ColumnOrderEditor;
-import net.sf.jailer.ui.CommandLineInstance;
 import net.sf.jailer.ui.DataModelEditor;
 import net.sf.jailer.ui.DataModelManager;
 import net.sf.jailer.ui.DataModelManagerDialog;
@@ -136,6 +137,7 @@ import net.sf.jailer.ui.SessionForUI;
 import net.sf.jailer.ui.StringSearchPanel;
 import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.associationproposer.AssociationProposerView;
+import net.sf.jailer.ui.commandline.CommandLineInstance;
 import net.sf.jailer.ui.constraintcheck.ConstraintChecker;
 import net.sf.jailer.ui.databrowser.BrowserContentPane.SqlStatementTable;
 import net.sf.jailer.ui.databrowser.Desktop.LayoutMode;
@@ -149,6 +151,7 @@ import net.sf.jailer.ui.databrowser.metadata.MetaDataPanel.OutlineInfo;
 import net.sf.jailer.ui.databrowser.metadata.MetaDataSource;
 import net.sf.jailer.ui.databrowser.sqlconsole.SQLConsole;
 import net.sf.jailer.ui.syntaxtextarea.BasicFormatterImpl;
+import net.sf.jailer.ui.util.AnimationController;
 import net.sf.jailer.ui.util.SmallButton;
 import net.sf.jailer.ui.util.UISettings;
 import net.sf.jailer.ui.util.UpdateInfoManager;
@@ -219,7 +222,7 @@ public class DataBrowser extends javax.swing.JFrame {
      * @param dbConnectionDialog
      *            DB-connection dialog
      */
-    public DataBrowser(final DataModel datamodel, final Table root, String condition, DbConnectionDialog dbConnectionDialog, boolean embedded, final ExecutionContext executionContext) throws Exception {
+    public DataBrowser(final DataModel datamodel, final Table root, String condition, DbConnectionDialog dbConnectionDialog, Map<String, String> schemaMapping, boolean embedded, final ExecutionContext executionContext) throws Exception {
         this.executionContext = executionContext;
         this.datamodel = new Reference<DataModel>(datamodel);
         this.dbConnectionDialog = dbConnectionDialog != null ? new DbConnectionDialog(this, dbConnectionDialog, DataBrowserContext.getAppName(), executionContext) : null;
@@ -233,11 +236,16 @@ public class DataBrowser extends javax.swing.JFrame {
             DataBrowserContext.setSupportsDataModelUpdates(false);
         }
         initComponents();
-        UpdateInfoManager.checkUpdateAvailability(updateInfoPanel, updateInfoLabel, "B");
+        initMenu();
+        
+        UpdateInfoManager.checkUpdateAvailability(updateInfoPanel, updateInfoLabel, downloadMenuItem, "B");
 		UIUtil.initPLAFMenuItem(nativeLAFCheckBoxMenuItem, this);
+		if (datamodel != null) {
+			UISettings.dmStats(datamodel);
+		}
 		initRowLimitButtons();
-        autoLayoutMenuItem.setSelected(inAutoLayoutMode());
         workbenchTabbedPane.setTabComponentAt(0, new JLabel("Desktop", desktopIcon, JLabel.LEFT));
+        workbenchTabbedPane.setTabComponentAt(1, new JLabel("SQL Console ", sqlConsoleIcon, JLabel.LEFT));
         workbenchTabbedPane.setTabComponentAt(workbenchTabbedPane.getTabCount() - 1, new JLabel(addSqlConsoleIcon));
         
         tableTreesTabbedPane.setTabComponentAt(0, new JLabel("Navigation", navigationIcon, JLabel.LEFT));
@@ -246,7 +254,7 @@ public class DataBrowser extends javax.swing.JFrame {
         tableTreesTabbedPane.addChangeListener(new ChangeListener() {
 			@Override
 			public void stateChanged(ChangeEvent e) {
-		        if (createMetaDataPanel != null && tableTreesTabbedPane.getSelectedComponent() == tablesPanel) {
+		        if (createMetaDataPanel != null && tableTreesTabbedPane.getSelectedComponent() == tablesCardPanel) {
 					UIUtil.invokeLater(10, new Runnable() {
 						@Override
 						public void run() {
@@ -285,7 +293,7 @@ public class DataBrowser extends javax.swing.JFrame {
         gridBagConstraints.gridy = 1;
         gridBagConstraints.fill = java.awt.GridBagConstraints.NONE;
         gridBagConstraints.weightx = 0;
-        JButton searchButton = StringSearchPanel.createSearchButton(this, tablesComboBox, "Open Table Browser", new Runnable() {
+        searchButton = StringSearchPanel.createSearchButton(this, tablesComboBox, "Open Table Browser", new Runnable() {
 			@Override
 			public void run() {
 				openTableButtonActionPerformed(null);
@@ -327,7 +335,7 @@ public class DataBrowser extends javax.swing.JFrame {
 			@Override
 			public void componentShown(ComponentEvent e) {
 				layeredPaneContent.setSize(jLayeredPane1.getSize());
-				SwingUtilities.invokeLater(new Runnable() {
+				UIUtil.invokeLater(new Runnable() {
 					@Override
 					public void run() {
 						desktopSplitPane.setDividerLocation(0.75);
@@ -537,8 +545,11 @@ public class DataBrowser extends javax.swing.JFrame {
 
         if (dbConnectionDialog != null) {
             createSession(dbConnectionDialog);
+            if (session == null) {
+            	return;
+            }
         }
-        desktop = new Desktop(this.datamodel, jailerIcon, session, this, dbConnectionDialog, anchorManager, executionContext) {
+        desktop = new Desktop(this.datamodel, jailerIcon, session, this, dbConnectionDialog, schemaMapping == null? new HashMap<String, String>() : schemaMapping, anchorManager, executionContext) {
             @Override
             public void openSchemaAnalyzer() {
                 updateDataModel();
@@ -547,7 +558,8 @@ public class DataBrowser extends javax.swing.JFrame {
             protected void updateMenu(boolean hasTableBrowser, boolean hasIFrame) {
             	storeSessionItem.setEnabled(hasIFrame);
             	closeAllMenuItem.setEnabled(hasIFrame);
-                exportDataMenuItem.setEnabled(hasTableBrowser);
+            	addBookmarkMenuItem.setEnabled(hasTableBrowser);
+            	exportDataMenuItem.setEnabled(hasTableBrowser);
                 createExtractionModelMenuItem.setEnabled(hasTableBrowser);
                 updateIFramesBar();
                 super.updateMenu(hasTableBrowser, hasIFrame);
@@ -555,17 +567,13 @@ public class DataBrowser extends javax.swing.JFrame {
 
             @Override
             protected void updateMenu(LayoutMode layoutMode) {
-                if (layoutMode == Desktop.LayoutMode.TINY) {
-                    tinyLayoutRadioButtonMenuItem.setSelected(true);
-                } else if (layoutMode == Desktop.LayoutMode.SMALL) {
-                    smallLayoutRadioButtonMenuItem.setSelected(true);
-                } else if (layoutMode == Desktop.LayoutMode.MEDIUM) {
-                    mediumLayoutRadioButtonMenuItem.setSelected(true);
-                } else if (layoutMode == Desktop.LayoutMode.LARGE) {
-                    largeLayoutRadioButtonMenuItem.setSelected(true);
-                } else if (layoutMode == Desktop.LayoutMode.THUMBNAIL) {
-                    thumbnailLayoutRadioButtonMenuItem.setSelected(true);
-                }
+            	zoomInMenuItem.setEnabled(layoutMode != Desktop.LayoutMode.LARGE);
+            	zoomOutMenuItem.setEnabled(layoutMode != Desktop.LayoutMode.THUMBNAIL);
+            	tinyLayoutRadioButtonMenuItem.setSelected(layoutMode == Desktop.LayoutMode.TINY);
+            	smallLayoutRadioButtonMenuItem.setSelected(layoutMode == Desktop.LayoutMode.SMALL);
+            	mediumLayoutRadioButtonMenuItem.setSelected(layoutMode == Desktop.LayoutMode.MEDIUM);
+            	largeLayoutRadioButtonMenuItem.setSelected(layoutMode == Desktop.LayoutMode.LARGE);
+            	thumbnailLayoutRadioButtonMenuItem.setSelected(layoutMode == Desktop.LayoutMode.THUMBNAIL);
             }
 
             @Override
@@ -593,7 +601,7 @@ public class DataBrowser extends javax.swing.JFrame {
 
 			@Override
 			public void onLayoutChanged(boolean isLayouted, boolean scrollToCenter) {
-				if (!isLayouted && autoLayoutMenuItem.isSelected()) {
+				if (!isLayouted) {
 					arrangeLayout(scrollToCenter);
 				}
 			}
@@ -619,7 +627,18 @@ public class DataBrowser extends javax.swing.JFrame {
 					anchorManager.checkRetention();
 				}
 			}
+
+			@Override
+			public void updateBookmarksMenu() {
+		        new BookmarksPanel(DataBrowser.this, bookmarkMenu, desktop, executionContext).updateBookmarksMenu();
+			}
+
+			@Override
+			protected void changeColumnOrder(Table table) {
+				openColumnOrderEditor(table);
+			}
         };
+        new BookmarksPanel(this, bookmarkMenu, desktop, executionContext).updateBookmarksMenu();
 
         jScrollPane1.setViewportView(desktop);
         addWindowListener(new WindowListener() {
@@ -779,6 +798,13 @@ public class DataBrowser extends javax.swing.JFrame {
         desktop.addMouseMotionListener(mia);
         desktop.addMouseListener(mia);
 
+        AnimationController.registerWindow(this, new AnimationController.AnimationControl() {
+			@Override
+			public void setEnabled(boolean enabled) {
+				desktop.setAnimationEnabled(enabled);
+			}
+		});
+
         int c = 0;
         for (Frame frame: Frame.getFrames()) {
             if (frame instanceof DataBrowser && frame.isVisible()) {
@@ -787,14 +813,14 @@ public class DataBrowser extends javax.swing.JFrame {
         }
         
         setLocation(40 + c * 32, 40 + c * 32);
-        setSize(980, 840);
+        setSize(980, 640);
         
         UIUtil.fit(this);
         
         if (root != null) {
-            final RowBrowser rb = desktop.addTableBrowser(null, null, 0, root, null, condition, null, true);
+            final RowBrowser rb = desktop.addTableBrowser(null, null, root, null, condition, null, null, true);
             if (rb != null && rb.internalFrame != null) {
-                SwingUtilities.invokeLater(new Runnable() {
+                UIUtil.invokeLater(10, new Runnable() {
                     @Override
                     public void run() {
                         try {
@@ -862,7 +888,7 @@ public class DataBrowser extends javax.swing.JFrame {
         };
 
         navigationTree.getSelectionModel().addTreeSelectionListener(treeListener);
-        initDnD();
+        initDnD(this);
     }
 
     private Map<JRadioButtonMenuItem, Integer> rowLimitButtonToLimit = new HashMap<JRadioButtonMenuItem, Integer>();
@@ -923,18 +949,19 @@ public class DataBrowser extends javax.swing.JFrame {
 	}
 
     private void createSession(DbConnectionDialog dbConnectionDialog) throws Exception {
-        if (session != null) {
-            try {
-                session.shutDown();
-                session = null;
-            } catch (Exception e) {
-                // ignore
-            }
-        }
         ConnectionInfo connection = dbConnectionDialog.currentConnection;
-        BasicDataSource dataSource = new BasicDataSource(connection.driverClass, connection.url, connection.user, connection.password, 0, dbConnectionDialog.currentJarURLs());
-        session = SessionForUI.createSession(dataSource, dataSource.dbms, this);
-        if (session != null) {
+        BasicDataSource dataSource = UIUtil.createBasicDataSource(this, connection.driverClass, connection.url, connection.user, connection.password, 0, dbConnectionDialog.currentJarURLs());
+        SessionForUI newSession = SessionForUI.createSession(dataSource, dataSource.dbms, executionContext.getIsolationLevel(), this);
+        if (newSession != null) {
+            if (session != null) {
+                try {
+                    session.shutDown();
+                    session = null;
+                } catch (Exception e) {
+                    // ignore
+                }
+            }
+        	session = newSession;
 	        List<String> args = new ArrayList<String>();
 	        dbConnectionDialog.addDbArgs(args);
 	        session.setCliArguments(args);
@@ -1069,6 +1096,7 @@ public class DataBrowser extends javax.swing.JFrame {
         jInternalFrame1 = new javax.swing.JInternalFrame();
         hiddenPanel = new javax.swing.JPanel();
         closurePanel = new javax.swing.JPanel();
+        consoleDummyPanel = new javax.swing.JPanel();
         addSQLConsoleTab = new javax.swing.JPanel();
         jPanel4 = new javax.swing.JPanel();
         jSplitPane4 = new javax.swing.JSplitPane();
@@ -1077,7 +1105,12 @@ public class DataBrowser extends javax.swing.JFrame {
         navigationTreeScrollPane = new javax.swing.JScrollPane();
         navigationTree = new javax.swing.JTree();
         openTableButton = new javax.swing.JButton();
+        tablesCardPanel = new javax.swing.JPanel();
         tablesPanel = new javax.swing.JPanel();
+        jPanel6 = new javax.swing.JPanel();
+        jScrollPane2 = new javax.swing.JScrollPane();
+        jTree1 = new javax.swing.JTree();
+        refreshButton = new javax.swing.JButton();
         detailsAndBorderBrowserTabbedPane = new javax.swing.JTabbedPane();
         jPanel7 = new javax.swing.JPanel();
         metaDataViewPanel = new javax.swing.JPanel();
@@ -1133,19 +1166,26 @@ public class DataBrowser extends javax.swing.JFrame {
         jSeparator10 = new javax.swing.JPopupMenu.Separator();
         showDataModelMenuItem = new javax.swing.JCheckBoxMenuItem();
         schemaMappingMenuItem = new javax.swing.JMenuItem();
+        checkPKMenuItem = new javax.swing.JMenuItem();
         jviewMenu = new javax.swing.JMenu();
         rowLimitMenu = new javax.swing.JMenu();
+        bookmarkMenu = new javax.swing.JMenu();
+        addBookmarkMenuItem = new javax.swing.JMenuItem();
+        editBookmarkMenuItem = new javax.swing.JMenuItem();
+        jSeparator13 = new javax.swing.JPopupMenu.Separator();
         jMenu2 = new javax.swing.JMenu();
         exportDataMenuItem = new javax.swing.JMenuItem();
         dataImport = new javax.swing.JMenuItem();
         jSeparator8 = new javax.swing.JPopupMenu.Separator();
         createExtractionModelMenuItem = new javax.swing.JMenuItem();
-        jSeparator3 = new javax.swing.JPopupMenu.Separator();
         consistencyCheckMenuItem = new javax.swing.JMenuItem();
+        createCLIItem = new javax.swing.JMenuItem();
         menuWindow = new javax.swing.JMenu();
         layoutMenuItem = new javax.swing.JMenuItem();
-        autoLayoutMenuItem = new javax.swing.JCheckBoxMenuItem();
         jSeparator5 = new javax.swing.JPopupMenu.Separator();
+        zoomInMenuItem = new javax.swing.JMenuItem();
+        zoomOutMenuItem = new javax.swing.JMenuItem();
+        jSeparator15 = new javax.swing.JPopupMenu.Separator();
         thumbnailLayoutRadioButtonMenuItem = new javax.swing.JRadioButtonMenuItem();
         tinyLayoutRadioButtonMenuItem = new javax.swing.JRadioButtonMenuItem();
         smallLayoutRadioButtonMenuItem = new javax.swing.JRadioButtonMenuItem();
@@ -1160,6 +1200,8 @@ public class DataBrowser extends javax.swing.JFrame {
         helpMenu = new javax.swing.JMenu();
         jMenuItem4 = new javax.swing.JMenuItem();
         helpForum = new javax.swing.JMenuItem();
+        downloadMenuItem = new javax.swing.JMenuItem();
+        jSeparator14 = new javax.swing.JPopupMenu.Separator();
         aboutMenuItem = new javax.swing.JMenuItem();
 
         jTable1.setModel(new javax.swing.table.DefaultTableModel(
@@ -1186,7 +1228,7 @@ public class DataBrowser extends javax.swing.JFrame {
         legende1.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
         legende1.setLayout(new java.awt.GridBagLayout());
 
-        modelName.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        modelName.setFont(modelName.getFont().deriveFont(modelName.getFont().getSize()+1f));
         modelName.setText("Data Model \"Demo\"");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;
@@ -1195,7 +1237,7 @@ public class DataBrowser extends javax.swing.JFrame {
         gridBagConstraints.insets = new java.awt.Insets(0, 8, 0, 12);
         legende1.add(modelName, gridBagConstraints);
 
-        modelPath.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        modelPath.setFont(modelPath.getFont().deriveFont(modelPath.getFont().getSize()+1f));
         modelPath.setForeground(java.awt.Color.gray);
         modelPath.setText("/home/jailer/datamodel/");
         gridBagConstraints = new java.awt.GridBagConstraints();
@@ -1217,22 +1259,22 @@ public class DataBrowser extends javax.swing.JFrame {
         legende.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
         legende.setLayout(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 0));
 
-        dependsOn.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        dependsOn.setFont(dependsOn.getFont().deriveFont(dependsOn.getFont().getSize()+1f));
         dependsOn.setForeground(new java.awt.Color(170, 0, 0));
         dependsOn.setText(" depends on (has parent) ");
         legende.add(dependsOn);
 
-        hasDependent.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        hasDependent.setFont(hasDependent.getFont().deriveFont(hasDependent.getFont().getSize()+1f));
         hasDependent.setForeground(new java.awt.Color(0, 112, 0));
         hasDependent.setText("  has dependent (has child) ");
         legende.add(hasDependent);
 
-        associatedWith.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        associatedWith.setFont(associatedWith.getFont().deriveFont(associatedWith.getFont().getSize()+1f));
         associatedWith.setForeground(new java.awt.Color(0, 100, 255));
         associatedWith.setText("  associated with");
         legende.add(associatedWith);
 
-        ignored.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        ignored.setFont(ignored.getFont().deriveFont(ignored.getFont().getSize()+1f));
         ignored.setForeground(new java.awt.Color(153, 153, 153));
         ignored.setText("  disabled ");
         legende.add(ignored);
@@ -1247,7 +1289,7 @@ public class DataBrowser extends javax.swing.JFrame {
         schemaNamePanel.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
         schemaNamePanel.setLayout(new java.awt.GridBagLayout());
 
-        schemaName.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        schemaName.setFont(schemaName.getFont().deriveFont(schemaName.getFont().getSize()+1f));
         schemaName.setText("Schema");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;
@@ -1270,7 +1312,7 @@ public class DataBrowser extends javax.swing.JFrame {
         legende2.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED));
         legende2.setLayout(new java.awt.GridBagLayout());
 
-        connectivityState.setFont(new java.awt.Font("Dialog", 0, 12)); // NOI18N
+        connectivityState.setFont(connectivityState.getFont().deriveFont(connectivityState.getFont().getSize()+1f));
         connectivityState.setText("offline");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;
@@ -1356,6 +1398,7 @@ public class DataBrowser extends javax.swing.JFrame {
         desktopSplitPane.setRightComponent(closurePanel);
 
         workbenchTabbedPane.addTab("Desktop", desktopSplitPane);
+        workbenchTabbedPane.addTab("SQL Console", consoleDummyPanel);
         workbenchTabbedPane.addTab("+", addSQLConsoleTab);
 
         gridBagConstraints = new java.awt.GridBagConstraints();
@@ -1410,8 +1453,43 @@ public class DataBrowser extends javax.swing.JFrame {
 
         tableTreesTabbedPane.addTab("Navigation", navigationPanel);
 
+        tablesCardPanel.setLayout(new java.awt.CardLayout());
+
         tablesPanel.setLayout(new java.awt.BorderLayout());
-        tableTreesTabbedPane.addTab("Database", tablesPanel);
+        tablesCardPanel.add(tablesPanel, "tables");
+
+        jPanel6.setLayout(new java.awt.GridBagLayout());
+
+        javax.swing.tree.DefaultMutableTreeNode treeNode1 = new javax.swing.tree.DefaultMutableTreeNode("loading database meta data...");
+        jTree1.setModel(new javax.swing.tree.DefaultTreeModel(treeNode1));
+        jTree1.setSelectionModel(null);
+        jScrollPane2.setViewportView(jTree1);
+
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 1;
+        gridBagConstraints.gridy = 2;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
+        gridBagConstraints.weightx = 1.0;
+        gridBagConstraints.weighty = 1.0;
+        jPanel6.add(jScrollPane2, gridBagConstraints);
+
+        refreshButton.setText("Refresh");
+        refreshButton.setToolTipText("Refresh Database Meta Data Cache");
+        refreshButton.setEnabled(false);
+        refreshButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                refreshButtonActionPerformed(evt);
+            }
+        });
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 1;
+        gridBagConstraints.gridy = 1;
+        gridBagConstraints.anchor = java.awt.GridBagConstraints.EAST;
+        jPanel6.add(refreshButton, gridBagConstraints);
+
+        tablesCardPanel.add(jPanel6, "loading");
+
+        tableTreesTabbedPane.addTab("Database", tablesCardPanel);
 
         jSplitPane4.setLeftComponent(tableTreesTabbedPane);
 
@@ -1789,6 +1867,14 @@ public class DataBrowser extends javax.swing.JFrame {
         });
         menuTools.add(schemaMappingMenuItem);
 
+        checkPKMenuItem.setText("Check Primary Keys");
+        checkPKMenuItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                checkPKMenuItemActionPerformed(evt);
+            }
+        });
+        menuTools.add(checkPKMenuItem);
+
         menuBar.add(menuTools);
 
         jviewMenu.setText("View");
@@ -1798,6 +1884,28 @@ public class DataBrowser extends javax.swing.JFrame {
         jviewMenu.add(rowLimitMenu);
 
         menuBar.add(jviewMenu);
+
+        bookmarkMenu.setText("Bookmark");
+
+        addBookmarkMenuItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_B, java.awt.event.InputEvent.CTRL_MASK));
+        addBookmarkMenuItem.setText("Add Bookmark");
+        addBookmarkMenuItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                addBookmarkMenuItemActionPerformed(evt);
+            }
+        });
+        bookmarkMenu.add(addBookmarkMenuItem);
+
+        editBookmarkMenuItem.setText("Edit Bookmarks");
+        editBookmarkMenuItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                editBookmarkMenuItemActionPerformed(evt);
+            }
+        });
+        bookmarkMenu.add(editBookmarkMenuItem);
+        bookmarkMenu.add(jSeparator13);
+
+        menuBar.add(bookmarkMenu);
 
         jMenu2.setText("Tools");
 
@@ -1825,7 +1933,6 @@ public class DataBrowser extends javax.swing.JFrame {
             }
         });
         jMenu2.add(createExtractionModelMenuItem);
-        jMenu2.add(jSeparator3);
 
         consistencyCheckMenuItem.setText("Check Consistency");
         consistencyCheckMenuItem.addActionListener(new java.awt.event.ActionListener() {
@@ -1834,6 +1941,14 @@ public class DataBrowser extends javax.swing.JFrame {
             }
         });
         jMenu2.add(consistencyCheckMenuItem);
+
+        createCLIItem.setText("Show Command Line");
+        createCLIItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                createCLIItemActionPerformed(evt);
+            }
+        });
+        jMenu2.add(createCLIItem);
 
         menuBar.add(jMenu2);
 
@@ -1847,17 +1962,26 @@ public class DataBrowser extends javax.swing.JFrame {
             }
         });
         menuWindow.add(layoutMenuItem);
+        menuWindow.add(jSeparator5);
 
-        autoLayoutMenuItem.setSelected(true);
-        autoLayoutMenuItem.setText("Auto Layout");
-        autoLayoutMenuItem.setToolTipText("Automatically layout windows ");
-        autoLayoutMenuItem.addActionListener(new java.awt.event.ActionListener() {
+        zoomInMenuItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_PLUS, java.awt.event.InputEvent.CTRL_MASK));
+        zoomInMenuItem.setText("Zoom In (Mouse Wheel Up)");
+        zoomInMenuItem.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                autoLayoutMenuItemActionPerformed(evt);
+                zoomInMenuItemActionPerformed(evt);
             }
         });
-        menuWindow.add(autoLayoutMenuItem);
-        menuWindow.add(jSeparator5);
+        menuWindow.add(zoomInMenuItem);
+
+        zoomOutMenuItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_MINUS, java.awt.event.InputEvent.CTRL_MASK));
+        zoomOutMenuItem.setText("Zoom Out (Mouse Wheel Down)");
+        zoomOutMenuItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                zoomOutMenuItemActionPerformed(evt);
+            }
+        });
+        menuWindow.add(zoomOutMenuItem);
+        menuWindow.add(jSeparator15);
 
         thumbnailLayoutRadioButtonMenuItem.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_0, java.awt.event.InputEvent.CTRL_MASK));
         thumbnailLayoutRadioButtonMenuItem.setText("Thumbnail Layout");
@@ -1950,6 +2074,15 @@ public class DataBrowser extends javax.swing.JFrame {
         });
         helpMenu.add(helpForum);
 
+        downloadMenuItem.setText("Download Latest Version");
+        downloadMenuItem.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                downloadMenuItemActionPerformed(evt);
+            }
+        });
+        helpMenu.add(downloadMenuItem);
+        helpMenu.add(jSeparator14);
+
         aboutMenuItem.setText("About Jailer");
         aboutMenuItem.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
@@ -1981,7 +2114,8 @@ public class DataBrowser extends javax.swing.JFrame {
                     dcd.addDbArgs(args);
                     ImportDialog importDialog = new ImportDialog(this, sqlFile, args, dbConnectionDialog.getUser(), dbConnectionDialog.getPassword(), true);
                     if (importDialog.isOk) {
-                        UIUtil.runJailer(this, args, false, true, false, false, null, dcd.getUser(), dcd.getPassword(), null, null, false, true, false, executionContext);
+                    	importDialog.fillCLIArgs(args);
+						UIUtil.runJailer(this, args, false, true, false, false, null, dcd.getUser(), dcd.getPassword(), null, null, false, true, false, executionContext);
                         if (desktop != null) {
                             desktop.updateMenu();
                             for (RowBrowser rb : desktop.getBrowsers()) {
@@ -2007,7 +2141,7 @@ public class DataBrowser extends javax.swing.JFrame {
     private void openTableButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_openTableButtonActionPerformed
     	if (tablesComboBox.getSelectedItem() != null) {
     		String tableName = tablesComboBox.getSelectedItem().toString();
-    		desktop.addTableBrowser(null, null, 0, datamodel.get().getTableByDisplayName(tableName), null, "", null, true);
+    		desktop.addTableBrowser(null, null, datamodel.get().getTableByDisplayName(tableName), null, "", null, null, true);
     		switchToDesktop();
     	}
     }//GEN-LAST:event_openTableButtonActionPerformed
@@ -2039,7 +2173,7 @@ public class DataBrowser extends javax.swing.JFrame {
 	        } else {
 	        	SQLConsole sqlConsole = getCurrentSQLConsole();
 	        	if (sqlConsole != null) {
-	        		tableTreesTabbedPane.setSelectedComponent(tablesPanel);
+	        		tableTreesTabbedPane.setSelectedComponent(tablesCardPanel);
 	        		sqlConsole.grabFocus();
 	        		sqlConsole.update();
 	        	}
@@ -2057,7 +2191,7 @@ public class DataBrowser extends javax.swing.JFrame {
 			@Override
 			protected void openTableBrowser(Table source, String where) {
 				workbenchTabbedPane.setSelectedComponent(desktopSplitPane);
-	    		desktop.addTableBrowser(null, null, 0, source, null, new BasicFormatterImpl().format(where), null, true);
+	    		desktop.addTableBrowser(null, null, source, null, new BasicFormatterImpl().format(where), null, null, true);
 			}
 
 			@Override
@@ -2107,7 +2241,7 @@ public class DataBrowser extends javax.swing.JFrame {
 
     private void jMenuItem4ActionPerformed(java.awt.event.ActionEvent evt) {// GEN-FIRST:event_jMenuItem4ActionPerformed
         try {
-            BrowserLauncher.openURL(new URI("http://jailer.sourceforge.net/doc/data-browsing.html"));
+            BrowserLauncher.openURL(new URI("http://jailer.sourceforge.net/data-browsing.html"));
         } catch (Exception e) {
             UIUtil.showException(this, "Error", e, session);
         }
@@ -2118,11 +2252,12 @@ public class DataBrowser extends javax.swing.JFrame {
     }// GEN-LAST:event_createExtractionModelMenuItemActionPerformed
 
     private void storeSessionItemActionPerformed(java.awt.event.ActionEvent evt) {// GEN-FIRST:event_storeSessionItemActionPerformed
-        desktop.storeSession();
+        desktop.storeSession((BookmarksPanel) null);
     }// GEN-LAST:event_storeSessionItemActionPerformed
 
     private void restoreSessionItemActionPerformed(java.awt.event.ActionEvent evt) {// GEN-FIRST:event_restoreSessionItemActionPerformed
-        desktop.restoreSession(null);
+ 		UISettings.s6 += 10000000;
+ 		desktop.restoreSession(null, null);
     }// GEN-LAST:event_restoreSessionItemActionPerformed
 
     private void tinyLayoutRadioButtonMenuItemActionPerformed(java.awt.event.ActionEvent evt) {// GEN-FIRST:event_tinyLayoutRadioButtonMenuItemActionPerformed
@@ -2186,9 +2321,9 @@ public class DataBrowser extends javax.swing.JFrame {
                     navigationTree.setSelectionRow(row);
                     JPopupMenu popup = rowBrowser.browserContentPane.createPopupMenu(null, -1, 0, 0, false);
                     if (popup != null) {
-                        JPopupMenu popup2 = rowBrowser.browserContentPane.createSqlPopupMenu(null, -1, 0, 0, true, navigationTreeScrollPane);
+                        JPopupMenu popup2 = rowBrowser.browserContentPane.createSqlPopupMenu(-1, 0, 0, true, navigationTreeScrollPane);
                         if (popup2.getComponentCount() > 0 && popup.getComponentCount() > 0) {
-	                        popup.add(new JSeparator());
+	                        // popup.add(new JSeparator());
 	                    }
                         for (Component c : popup2.getComponents()) {
                             popup.add(c);
@@ -2230,7 +2365,7 @@ public class DataBrowser extends javax.swing.JFrame {
         new NewTableBrowser(this, datamodel.get(), offerAlternatives) {
             @Override
             void openTableBrowser(String tableName) {
-                desktop.addTableBrowser(null, null, 0, datamodel.get().getTableByDisplayName(tableName), null, "", null, true);
+                desktop.addTableBrowser(null, null, datamodel.get().getTableByDisplayName(tableName), null, "", null, null, true);
         		switchToDesktop();
            }
 
@@ -2241,14 +2376,14 @@ public class DataBrowser extends javax.swing.JFrame {
 
             @Override
             void restoreSession() {
-                desktop.restoreSession(null);
+                desktop.restoreSession(null, null);
             }
         };
     }
 
     private void helpForumActionPerformed(java.awt.event.ActionEvent evt) {// GEN-FIRST:event_helpForumActionPerformed
         try {
-            BrowserLauncher.openURL(new URI("https://sourceforge.net/forum/?group_id=197260"));
+            BrowserLauncher.openURL(new URI("https://sourceforge.net/p/jailer/discussion/"));
         } catch (Exception e) {
             UIUtil.showException(this, "Error", e, session);
         }
@@ -2283,7 +2418,8 @@ public class DataBrowser extends javax.swing.JFrame {
         try {
             start(args);
         } catch (Throwable t) {
-            UIUtil.showException(null, "Error", t);
+        	t.printStackTrace();
+        	UIUtil.showException(null, "Error", t);
         }
     }
     
@@ -2295,6 +2431,7 @@ public class DataBrowser extends javax.swing.JFrame {
         try {
         	Environment.init();
         } catch (Throwable e) {
+        	e.printStackTrace();
 			UIUtil.showException(null, "Error", e);
 			return;
 		}
@@ -2308,6 +2445,7 @@ public class DataBrowser extends javax.swing.JFrame {
         try {
             CommandLineInstance.init(args);
         } catch (Exception e) {
+        	e.printStackTrace();
             UIUtil.showException(null, "Illegal arguments", e);
             return;
         }
@@ -2317,9 +2455,11 @@ public class DataBrowser extends javax.swing.JFrame {
         }
         try {
             // create initial data-model files
-            File file = new File(DataModel.getDatamodelFolder(new ExecutionContext(CommandLineInstance.getInstance())));
-            if (!file.exists()) {
-                file.mkdir();
+        	if (CommandLineInstance.getInstance().datamodelFolder == null) {
+        		File file = new File(DataModel.getDatamodelFolder(new ExecutionContext()));
+        		if (!file.exists()) {
+        			file.mkdir();
+        		}
             }
         } catch (Exception e) {
         }
@@ -2338,8 +2478,8 @@ public class DataBrowser extends javax.swing.JFrame {
 	                        ((InputMap) UIManager.get("Button.focusInputMap")).put(KeyStroke.getKeyStroke("pressed ENTER"), "pressed");
 	                        ((InputMap) UIManager.get("Button.focusInputMap")).put(KeyStroke.getKeyStroke("released ENTER"), "released");
 	                        Object dSize = UIManager.get("SplitPane.dividerSize");
-	                        if (new Integer(10).equals(dSize)) {
-	                        	UIManager.put("SplitPane.dividerSize", new Integer(14));
+	                        if (Integer.valueOf(10).equals(dSize)) {
+	                        	UIManager.put("SplitPane.dividerSize", Integer.valueOf(14));
 	                        }
 	
 	                        if (UIManager.get("InternalFrame:InternalFrameTitlePane[Enabled].textForeground") instanceof Color) {
@@ -2359,11 +2499,8 @@ public class DataBrowser extends javax.swing.JFrame {
     }
 
     private static DataBrowser openNewDataBrowser(DataModel datamodel, DbConnectionDialog dbConnectionDialog, boolean maximize, ExecutionContext executionContext, DataBrowser theDataBrowser) throws Exception {
-        final DataBrowser dataBrowser = theDataBrowser != null? theDataBrowser : new DataBrowser(datamodel, null, "", null, false, executionContext);
+        final DataBrowser dataBrowser = theDataBrowser != null? theDataBrowser : new DataBrowser(datamodel, null, "", null, ExecutionContext.getSchemaMapping(CommandLineInstance.getInstance().rawschemamapping), false, executionContext);
         dataBrowser.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-//		if (maximize) {
-//			dataBrowser.setExtendedState(JFrame.MAXIMIZED_BOTH);
-//		}
         dataBrowser.setVisible(true);
         dataBrowser.setExtendedState(Frame.MAXIMIZED_BOTH);
 
@@ -2372,8 +2509,9 @@ public class DataBrowser extends javax.swing.JFrame {
         } else {
             dbConnectionDialog = new DbConnectionDialog(dataBrowser, dbConnectionDialog, DataBrowserContext.getAppName(), executionContext);
         }
+        dbConnectionDialog.autoConnect();
         if (dbConnectionDialog.isConnected || dbConnectionDialog.connect(DataBrowserContext.getAppName(true))) {
-            dataBrowser.setConnection(dbConnectionDialog);
+    		dataBrowser.setConnection(dbConnectionDialog);
             if (dataBrowser.session != null) {
 	            dataBrowser.askForDataModel();
 	            dataBrowser.desktop.openSchemaMappingDialog(true);
@@ -2386,21 +2524,18 @@ public class DataBrowser extends javax.swing.JFrame {
             	dataBrowser.dbConnectionDialog = dbConnectionDialog;
             }
             dataBrowser.dispose();
+            return dataBrowser;
         }
-        SwingUtilities.invokeLater(new Runnable() {
+        String bmName = CommandLineInstance.getInstance().bookmark;
+		final File bmFile = BookmarksPanel.getBookmarksFile(bmName, dataBrowser.executionContext);
+        UIUtil.invokeLater(3, new Runnable() {
 			@Override
 			public void run() {
-		        SwingUtilities.invokeLater(new Runnable() {
-					@Override
-					public void run() {
-					SwingUtilities.invokeLater(new Runnable() {
-						@Override
-						public void run() {
-					        dataBrowser.toFront();
-						}
-					});
-					}
-				});
+		        dataBrowser.toFront();
+		        if (bmFile != null) {
+		        	dataBrowser.desktop.restoreSession(null, bmFile);
+		     		BookmarksPanel.setLastUsedBookmark(bmFile.getName(), dataBrowser.executionContext);
+		        }
 			}
 		});
         return dataBrowser;
@@ -2408,18 +2543,19 @@ public class DataBrowser extends javax.swing.JFrame {
 
     private static void createFrame() {
         DataModelManagerDialog dataModelManagerDialog = new DataModelManagerDialog(DataBrowserContext.getAppName(true)
-                + " - Relational Data Browser") {
+                + " - Relational Data Browser", false, "B") {
             @Override
             protected void onSelect(final DbConnectionDialog connectionDialog, final ExecutionContext executionContext) {
                 try {
                     final DataModel datamodel;
-                    datamodel = new DataModel(executionContext);
-                	final DataBrowser databrowser = new DataBrowser(datamodel, null, "", null, false, executionContext);
-                    SwingUtilities.invokeLater(new Runnable() {
+                    datamodel = new DataModel(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(executionContext), executionContext, true, null);;
+                	final DataBrowser databrowser = new DataBrowser(datamodel, null, "", null, ExecutionContext.getSchemaMapping(CommandLineInstance.getInstance().rawschemamapping), false, executionContext);
+                    UIUtil.invokeLater(new Runnable() {
 						@Override
 						public void run() {
 			                try {
 								openNewDataBrowser(datamodel, connectionDialog, true, executionContext, databrowser);
+								CommandLineInstance.clear();
 			                } catch (Exception e) {
 			                    UIUtil.showException(null, "Error", e);
 			                }
@@ -2427,11 +2563,16 @@ public class DataBrowser extends javax.swing.JFrame {
 					});
                 } catch (Exception e) {
                     UIUtil.showException(null, "Error", e);
+                    UIUtil.checkTermination();
                 }
             }
+			@Override
+			protected void onLoadExtractionmodel(String modelFile, ExecutionContext executionContext2) {
+				// nothing to do
+			}
 			private static final long serialVersionUID = 1L;
         };
-        dataModelManagerDialog.setVisible(true);
+        dataModelManagerDialog.start();
     }
 
     /**
@@ -2439,8 +2580,9 @@ public class DataBrowser extends javax.swing.JFrame {
      */
     private void openDataModelEditor(boolean merge) {
         try {
+        	UIUtil.setWaitCursor(this);
             String modelname = datamodel == null || datamodel.get() == null ? DataModel.DEFAULT_NAME : datamodel.get().getName();
-            DataModelEditor dataModelEditor = new DataModelEditor(this, merge, false, null, null, null, modelname, null, executionContext);
+            DataModelEditor dataModelEditor = new DataModelEditor(this, merge, false, null, null, null, modelname, null, dbConnectionDialog, executionContext);
             dataModelEditor.setVisible(true);
             removeMetaDataSource(session);
             desktop.reloadDataModel(desktop.schemaMapping);
@@ -2450,6 +2592,8 @@ public class DataBrowser extends javax.swing.JFrame {
             askForDataModel();
         } catch (Exception e) {
             UIUtil.showException(this, "Error", e, session);
+        } finally {
+        	UIUtil.resetWaitCursor(this);
         }
     }
 
@@ -2469,16 +2613,7 @@ public class DataBrowser extends javax.swing.JFrame {
             analyseOptionsDialog.setInitiallyWithViews(withViews);
             analyseOptionsDialog.setInitiallyWithSynonyms(withSynonyms);
             boolean[] isDefaultSchema = new boolean[1];
-            String[] defaultSchema = new String[1];
-            List<String> schemas;
-            UIUtil.setWaitCursor(this);
-            try {
-				CancellationHandler.reset(null);
-                schemas = dbConnectionDialog.getDBSchemas(defaultSchema);
-            } finally {
-            	UIUtil.resetWaitCursor(this);
-            }
-            if (analyseOptionsDialog.edit(schemas, defaultSchema[0], schemaName == null? null : Quoting.staticUnquote(schemaName), isDefaultSchema, dbConnectionDialog.currentConnection.user)) {
+            if (analyseOptionsDialog.edit(dbConnectionDialog, schemaName == null? null : Quoting.staticUnquote(schemaName), isDefaultSchema, dbConnectionDialog.currentConnection.user)) {
                 String schema = analyseOptionsDialog.getSelectedSchema();
                 if (schema != null) {
                     args.add("-schema");
@@ -2494,7 +2629,7 @@ public class DataBrowser extends javax.swing.JFrame {
                     String modelname = datamodel == null || datamodel.get() == null ? DataModel.DEFAULT_NAME : datamodel.get().getName();
                     DataModelEditor dataModelEditor = new DataModelEditor(this, true, analyseOptionsDialog.isRemoving(), null,
                             analyseOptionsDialog.getTableLineFilter(), analyseOptionsDialog.getAssociationLineFilter(), modelname,
-                            schema == null ? dbConnectionDialog.getName() : schema, executionContext);
+                            schema == null? dbConnectionDialog.getName() : schema, dbConnectionDialog, executionContext);
                     if (dataModelEditor.dataModelHasChanged()) {
                         dataModelEditor.setVisible(true);
                     }
@@ -2518,18 +2653,22 @@ public class DataBrowser extends javax.swing.JFrame {
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
     private javax.swing.JMenuItem aboutMenuItem;
+    private javax.swing.JMenuItem addBookmarkMenuItem;
     private javax.swing.JPanel addSQLConsoleTab;
     private javax.swing.JMenuItem analyseMenuItem;
     private javax.swing.JMenuItem analyseSQLMenuItem1;
     private javax.swing.JLabel associatedWith;
-    private javax.swing.JCheckBoxMenuItem autoLayoutMenuItem;
+    private javax.swing.JMenu bookmarkMenu;
     private javax.swing.JPanel borderBrowserPanel;
     private javax.swing.JPanel borderBrowserTabPane;
+    javax.swing.JMenuItem checkPKMenuItem;
     private javax.swing.JMenuItem closeAllMenuItem;
     private javax.swing.JPanel closurePanel;
     private javax.swing.JMenuItem columnOrderItem;
     public javax.swing.JLabel connectivityState;
     private javax.swing.JMenuItem consistencyCheckMenuItem;
+    private javax.swing.JPanel consoleDummyPanel;
+    private javax.swing.JMenuItem createCLIItem;
     private javax.swing.JMenuItem createExtractionModelMenuItem;
     private javax.swing.JMenuItem dataImport;
     private javax.swing.JMenuItem dataModelEditorjMenuItem;
@@ -2538,7 +2677,9 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JSplitPane desktopSplitPane;
     private javax.swing.JTabbedPane detailsAndBorderBrowserTabbedPane;
     private javax.swing.JButton downloadButton;
+    private javax.swing.JMenuItem downloadMenuItem;
     private javax.swing.JPanel dummy;
+    private javax.swing.JMenuItem editBookmarkMenuItem;
     private javax.swing.JMenuItem exitMenuItem;
     private javax.swing.JMenuItem exportDataMenuItem;
     private javax.swing.JLabel hasDependent;
@@ -2579,15 +2720,19 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JPanel jPanel3;
     private javax.swing.JPanel jPanel4;
     private javax.swing.JPanel jPanel5;
+    private javax.swing.JPanel jPanel6;
     private javax.swing.JPanel jPanel7;
     private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JScrollPane jScrollPane2;
     private javax.swing.JScrollPane jScrollPane3;
     private javax.swing.JPopupMenu.Separator jSeparator1;
     private javax.swing.JPopupMenu.Separator jSeparator10;
     private javax.swing.JPopupMenu.Separator jSeparator11;
     private javax.swing.JPopupMenu.Separator jSeparator12;
+    private javax.swing.JPopupMenu.Separator jSeparator13;
+    private javax.swing.JPopupMenu.Separator jSeparator14;
+    private javax.swing.JPopupMenu.Separator jSeparator15;
     private javax.swing.JPopupMenu.Separator jSeparator2;
-    private javax.swing.JPopupMenu.Separator jSeparator3;
     private javax.swing.JPopupMenu.Separator jSeparator4;
     private javax.swing.JPopupMenu.Separator jSeparator5;
     private javax.swing.JPopupMenu.Separator jSeparator6;
@@ -2597,6 +2742,7 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JSplitPane jSplitPane1;
     private javax.swing.JSplitPane jSplitPane4;
     private javax.swing.JTable jTable1;
+    private javax.swing.JTree jTree1;
     private javax.swing.JMenu jviewMenu;
     private javax.swing.JRadioButtonMenuItem largeLayoutRadioButtonMenuItem;
     private javax.swing.JPanel layeredPaneContent;
@@ -2620,6 +2766,7 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JMenuItem newWindowMenuItem;
     private javax.swing.JButton openTableButton;
     private javax.swing.JMenuItem reconnectMenuItem;
+    private javax.swing.JButton refreshButton;
     private javax.swing.JMenuItem restoreSessionItem;
     private javax.swing.JMenu rowLimitMenu;
     private javax.swing.JMenuItem saveScriptAsMenuItem;
@@ -2631,6 +2778,7 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JRadioButtonMenuItem smallLayoutRadioButtonMenuItem;
     private javax.swing.JMenuItem storeSessionItem;
     private javax.swing.JTabbedPane tableTreesTabbedPane;
+    private javax.swing.JPanel tablesCardPanel;
     private javax.swing.JPanel tablesPanel;
     private javax.swing.JRadioButtonMenuItem thumbnailLayoutRadioButtonMenuItem;
     private javax.swing.JRadioButtonMenuItem tinyLayoutRadioButtonMenuItem;
@@ -2639,8 +2787,12 @@ public class DataBrowser extends javax.swing.JFrame {
     private javax.swing.JPanel updateInfoPanel;
     private javax.swing.JMenu view;
     private javax.swing.JTabbedPane workbenchTabbedPane;
+    private javax.swing.JMenuItem zoomInMenuItem;
+    private javax.swing.JMenuItem zoomOutMenuItem;
     // End of variables declaration//GEN-END:variables
 
+    private JToggleButton searchButton;
+    
     /**
      * Sets Look&Feel.
      * 
@@ -2887,7 +3039,7 @@ public class DataBrowser extends javax.swing.JFrame {
 		if (detailsAndBorderBrowserTabbedPane.getSelectedComponent() != dataModelPanel) {
 			return;
 		}
-		SwingUtilities.invokeLater(new Runnable() {
+		UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 				try {
@@ -2902,7 +3054,7 @@ public class DataBrowser extends javax.swing.JFrame {
                     	dataModelViewFrame.select(table);
                     } else {
                     	Table toSelect = null;
-                    	if (lastFocusTable != null && tableTreesTabbedPane.getSelectedComponent() == tablesPanel) {
+                    	if (lastFocusTable != null && tableTreesTabbedPane.getSelectedComponent() == tablesCardPanel) {
                     		toSelect = datamodel.get().getTable(lastFocusTable.getName());
                     	}
                     	if (toSelect == null) {
@@ -2926,6 +3078,8 @@ public class DataBrowser extends javax.swing.JFrame {
 	                    	currentTableInDMV = toSelect;
 	                    }
                     }
+				} catch (IOException e) {
+					UIUtil.showException(DataBrowser.this, "Error", e);
 				} finally {
 					UIUtil.resetWaitCursor(DataBrowser.this);
 				}
@@ -2941,8 +3095,8 @@ public class DataBrowser extends javax.swing.JFrame {
             JInternalFrame currentSelection = desktop.getSelectedFrame();
             for (AssociationModel a : selection) {
                 BrowserAssociationModel associationModel = (BrowserAssociationModel) a;
-                desktop.addTableBrowser(associationModel.getRowBrowser(), associationModel.getRowBrowser(), -1, associationModel.getAssociation().destination, associationModel.getAssociation(),
-                        "", null, true);
+                desktop.addTableBrowser(associationModel.getRowBrowser(), associationModel.getRowBrowser(), associationModel.getAssociation().destination, associationModel.getAssociation(),
+                        "", null, null, true);
             }
             if (currentSelection != null) {
                 try {
@@ -3052,7 +3206,7 @@ public class DataBrowser extends javax.swing.JFrame {
                             }
                             return;
                         } else {
-                            openNewTableBrowser(false);
+                            searchButton.doClick(1);
                         }
                     }
                 }
@@ -3175,7 +3329,7 @@ public class DataBrowser extends javax.swing.JFrame {
 		            		}
 		            		Association association = associations[i - 1];
 		            		if (association != null) {
-		            			nextRb = rb.browserContentPane.navigateTo(association, -1, null);
+		            			nextRb = rb.browserContentPane.navigateTo(association, null);
 		            			visibleTables = null;
 		            		} else {
 		            			break;
@@ -3277,7 +3431,7 @@ public class DataBrowser extends javax.swing.JFrame {
     private Runnable createMetaDataPanel;
 
     private void onNewSession(Session newSession) {
-    	if (session == null) {
+    	if (newSession == null) {
     		return;
     	}
 
@@ -3285,6 +3439,7 @@ public class DataBrowser extends javax.swing.JFrame {
     	String alias = connection != null ? " " + connection.alias : " ";
     	
     	UIUtil.setWaitCursor(this);
+    	CancellationHandler.reset(null);
     	try {
 	    	updateNavigationCombobox();
 	    	
@@ -3295,26 +3450,35 @@ public class DataBrowser extends javax.swing.JFrame {
 				metaDataSource = getMetaDataSource(newSession);
 				if (metaDataSource == null || Boolean.TRUE.equals(session.getSessionProperty(DataBrowser.class, "removeMetaDataSource"))) {
 					metaDataSource = new MetaDataSource(newSession, datamodel.get(), alias, executionContext);
-					final MDSchema defaultSchema = metaDataSource.getDefaultSchema();
-					if (defaultSchema != null) {
-						// tigger reading meta data asynchronously
-						defaultSchema.loadTables(true, null, new Runnable() {
-							@Override
-							public void run() {
-								SwingUtilities.invokeLater(new Runnable() {
+					final MetaDataSource finalMetaDataSource = metaDataSource;
+					Thread thread = new Thread(new Runnable() {
+						@Override
+						public void run() {
+							Session.setThreadSharesConnection();
+							final MDSchema defaultSchema = finalMetaDataSource.getDefaultSchema();
+							if (defaultSchema != null) {
+								// trigger reading meta data asynchronously
+								defaultSchema.loadTables(true, null, new Runnable() {
 									@Override
 									public void run() {
-										if (createMetaDataPanel != null) {
-											createMetaDataPanel.run();
-										}
-										if (metaDataPanel != null) {
-											metaDataPanel.refresh();
-										}
+										UIUtil.invokeLater(new Runnable() {
+											@Override
+											public void run() {
+												if (createMetaDataPanel != null) {
+													createMetaDataPanel.run();
+												}
+												if (metaDataPanel != null) {
+													metaDataPanel.refresh();
+												}
+											}
+										});
 									}
 								});
 							}
-						});
-					}
+						}
+					});
+					thread.setDaemon(true);
+					thread.start();
 					metaDataPanel = null;
 				}
 				session.setSessionProperty(DataBrowser.class, "removeMetaDataSource", null);
@@ -3340,8 +3504,10 @@ public class DataBrowser extends javax.swing.JFrame {
 				e.printStackTrace();
 			}
 
+			((CardLayout) tablesCardPanel.getLayout()).show(tablesCardPanel, "loading");
+
 			final MetaDataSource fMetaDataSource = metaDataSource;
-			createMetaDataPanel = new Runnable() {
+			final Runnable createMetaDataPanelImmediately = new Runnable() {
 				@Override
 				public void run() {
 					if (metaDataPanel == null) {
@@ -3350,7 +3516,7 @@ public class DataBrowser extends javax.swing.JFrame {
 							protected void open(Table table) {
 								if (!selectNavTreeNode(navigationTree.getModel().getRoot(), table)) {
 									if (workbenchTabbedPane.getSelectedComponent() != getCurrentSQLConsole()) {
-										desktop.addTableBrowser(null, null, 0, table, null, "", null, true);
+										desktop.addTableBrowser(null, null, table, null, "", null, null, true);
 									}
 								}
 								try {
@@ -3482,14 +3648,42 @@ public class DataBrowser extends javax.swing.JFrame {
 							protected void setCaretPosition(int position) {
 								getCurrentSQLConsole().setCaretPosition(position);
 							}
+
+							@Override
+							protected void setOrResetWaitState(boolean set) {
+								((CardLayout) tablesCardPanel.getLayout()).show(tablesCardPanel, set? "loading" : "tables");
+							}
 						};
 					}
 					session.setSessionProperty(getClass(), "metaDataPanel", metaDataPanel);
 					tablesPanel.add(metaDataPanel, java.awt.BorderLayout.CENTER);
+					((CardLayout) tablesCardPanel.getLayout()).show(tablesCardPanel, "tables");
+				}
+			};
+			createMetaDataPanel = new Runnable() {
+				@Override
+				public void run() {
+					Thread thread = new Thread(new Runnable() {
+						@Override
+						public void run() {
+							Session.setThreadSharesConnection();
+
+							// trigger loading meta data
+							fMetaDataSource.getSchemas();
+							
+							UIUtil.invokeLater(new Runnable() {
+								@Override
+								public void run() {
+									createMetaDataPanelImmediately.run();
+								}
+							});
+						}
+					});
+					thread.setDaemon(true);
+					thread.start();
 					createMetaDataPanel = null;
 				}
 			};
-
 			if (tableTreesTabbedPane.getSelectedComponent() == tablesPanel) {
 				createMetaDataPanel.run();
 			}
@@ -3568,18 +3762,25 @@ public class DataBrowser extends javax.swing.JFrame {
 		final JLabel titleLbl = new JLabel(sqlConsoleIcon);
 		String tabName = "SQL Console";
 		++sqlConsoleNr;
-		final String title = tabName + (sqlConsoleNr > 1? " (" + sqlConsoleNr + ")" : "");
+		String title = tabName + (sqlConsoleNr > 1? " (" + sqlConsoleNr + ")" : "") + " ";
 
 		final SQLConsoleWithTitle sqlConsole = new SQLConsoleWithTitle(session, metaDataSource, datamodel, executionContext, title, titleLbl);
+		initDnD(sqlConsole.getEditorPane());
 		sqlConsoles.add(sqlConsole);
 		
 		try {
 			ignoreTabChangeEvent = true;
+    		for (int i = 0; i < workbenchTabbedPane.getTabCount(); ++i) {
+    			if (workbenchTabbedPane.getComponentAt(i) == consoleDummyPanel) {
+    				workbenchTabbedPane.removeTabAt(i);
+    				break;
+    			}
+    		}
 			workbenchTabbedPane.insertTab(title, null, sqlConsole, null, sqlConsoles.size());
 			JPanel titelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
 			titelPanel.setOpaque(false);
 			titleLbl.setText(title);
-			titleLbl.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 5));
+			// titleLbl.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 			titelPanel.add(titleLbl);
 			SmallButton closeButton = new SmallButton(closeIcon) {
 				@Override
@@ -3693,7 +3894,25 @@ public class DataBrowser extends javax.swing.JFrame {
 			}
 		}
     }//GEN-LAST:event_saveScriptMenuItemActionPerformed
-
+    
+	private void initMenu() {
+		int mask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+		if (mask != InputEvent.CTRL_MASK) {
+			for (int i = 0; i < menuBar.getMenuCount(); ++i) {
+				JMenu menu = menuBar.getMenu(i);
+				for (int j = 0; j < menu.getItemCount(); ++j) {
+					JMenuItem item = menu.getItem(j);
+					if (item != null) {
+						KeyStroke accelerator = item.getAccelerator();
+						if (accelerator != null) {
+							item.setAccelerator(KeyStroke.getKeyStroke(accelerator.getKeyCode(), mask, accelerator.isOnKeyRelease()));
+						}
+					}
+				}
+			}
+		}
+	}
+	
     private void saveScriptAsMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_saveScriptAsMenuItemActionPerformed
 		SQLConsole sqlConsole = getCurrentSQLConsole();
 		if (sqlConsole != null) {
@@ -3726,53 +3945,25 @@ public class DataBrowser extends javax.swing.JFrame {
     }//GEN-LAST:event_analyseSQLMenuItem1ActionPerformed
 
     private void columnOrderItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_columnOrderItemActionPerformed
-        try {
-        	new ColumnOrderEditor(this, datamodel.get(), executionContext);
-			removeMetaDataSource(session);
-            desktop.reloadDataModel(desktop.schemaMapping);
-            dataModelViewFrame = null;
-            updateDataModelView(null);
-            updateStatusBar();
-            askForDataModel();
+        openColumnOrderEditor(null);
+    }//GEN-LAST:event_columnOrderItemActionPerformed
+
+	private void openColumnOrderEditor(Table table) {
+		try {
+        	if (new ColumnOrderEditor(this, table, datamodel.get(), executionContext).wasOk()) {
+				removeMetaDataSource(session);
+	            desktop.reloadDataModel(desktop.schemaMapping);
+	            dataModelViewFrame = null;
+	            updateDataModelView(null);
+	            updateStatusBar();
+	            askForDataModel();
+        	}
 		} catch (Throwable e) {
 			UIUtil.showException(this, "Error", e);
 		}
-    }//GEN-LAST:event_columnOrderItemActionPerformed
-
-    private static final String AUTOLAYOUT_SETTINGS_FILE = ".autolayout";
-    
-	private boolean inAutoLayoutMode() {
-		File file = Environment.newFile(AUTOLAYOUT_SETTINGS_FILE);
-		if (!file.exists()) {
-			return true;
-		}
-		ObjectInputStream in;
-		try {
-			in = new ObjectInputStream(new FileInputStream(file));
-			Object content = in.readObject();
-			in.close();
-			return Boolean.TRUE.equals(content);
-		} catch (Exception e) {
-			return true;
-		}
 	}
 
-	private void setAutoLayoutMode(boolean selected) {
-		try {
-			File file = Environment.newFile(AUTOLAYOUT_SETTINGS_FILE);
-			ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(file));
-			out.writeObject(autoLayoutMenuItem.isSelected());
-			out.close();
-		} catch (Exception e) {
-			// ignore
-		}
-	}
-
-	private void autoLayoutMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_autoLayoutMenuItemActionPerformed
-        setAutoLayoutMode(autoLayoutMenuItem.isSelected());
-    }//GEN-LAST:event_autoLayoutMenuItemActionPerformed
-
-    private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
+	private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
         updateInfoPanel.setVisible(false);
     }//GEN-LAST:event_jButton1ActionPerformed
 
@@ -3784,6 +3975,71 @@ public class DataBrowser extends javax.swing.JFrame {
     private void nativeLAFCheckBoxMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_nativeLAFCheckBoxMenuItemActionPerformed
 
     }//GEN-LAST:event_nativeLAFCheckBoxMenuItemActionPerformed
+
+    private void addBookmarkMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_addBookmarkMenuItemActionPerformed
+        desktop.storeSession(new BookmarksPanel(this, bookmarkMenu, desktop, executionContext));
+    }//GEN-LAST:event_addBookmarkMenuItemActionPerformed
+
+    private void editBookmarkMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_editBookmarkMenuItemActionPerformed
+    	new BookmarksPanel(this, bookmarkMenu, desktop, executionContext).editBookmarks();
+    	desktop.updateAllBookmarkMenues();
+    }//GEN-LAST:event_editBookmarkMenuItemActionPerformed
+
+    private void downloadMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_downloadMenuItemActionPerformed
+        UpdateInfoManager.download();
+    }//GEN-LAST:event_downloadMenuItemActionPerformed
+
+    private void zoomInMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_zoomInMenuItemActionPerformed
+        desktop.zoom(1);
+    }//GEN-LAST:event_zoomInMenuItemActionPerformed
+
+    private void zoomOutMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_zoomOutMenuItemActionPerformed
+        desktop.zoom(-1);
+    }//GEN-LAST:event_zoomOutMenuItemActionPerformed
+
+    private void checkPKMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_checkPKMenuItemActionPerformed
+        try {
+            if (dbConnectionDialog.isConnected || dbConnectionDialog.connect("Check Primary Keys")) {
+                BasicDataSource dataSource = UIUtil.createBasicDataSource(this, dbConnectionDialog.currentConnection.driverClass, dbConnectionDialog.currentConnection.url, dbConnectionDialog.currentConnection.user, dbConnectionDialog.getPassword(), 0, dbConnectionDialog.currentJarURLs());
+                UIUtil.validatePrimaryKeys(this, dataSource, new TreeSet<Table>(datamodel.get().getTables()));
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+    }//GEN-LAST:event_checkPKMenuItemActionPerformed
+
+    private void refreshButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_refreshButtonActionPerformed
+    }//GEN-LAST:event_refreshButtonActionPerformed
+
+    private void createCLIItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_createCLIItemActionPerformed
+    	StringBuilder mapping = new StringBuilder();
+		for (String schema: desktop.schemaMapping.keySet()) {
+			String to = desktop.schemaMapping.get(schema).trim();
+			if (!schema.equals(to)) {
+				if (mapping.length() > 0) {
+					mapping.append(",");
+				}
+				mapping.append(schema + "=" + to);
+			}
+		}
+    	String bookmark = BookmarksPanel.getLastUsedBookmark(executionContext);
+    	if (bookmark != null) {
+    		bookmark = bookmarkName(bookmark);
+    	}
+		List<String> bookmarks = new ArrayList<String>();
+		for (StringBuilder sb: BookmarksPanel.loadBookmarks(executionContext)) {
+			bookmarks.add(bookmarkName(sb.toString()));
+		}
+		new CLIPanel(dbConnectionDialog, true, null, mapping.toString(), bookmarks, bookmark, executionContext).open(this);
+    }//GEN-LAST:event_createCLIItemActionPerformed
+
+    private String bookmarkName(String bookmarkFileName) {
+		if (bookmarkFileName.endsWith(BookmarksPanel.BOOKMARKFILE_EXTENSION)) {
+			return bookmarkFileName.substring(0, bookmarkFileName.length() - BookmarksPanel.BOOKMARKFILE_EXTENSION.length());
+		} else {
+			return bookmarkFileName;
+		}
+	}
 
 	private MetaDataDetailsPanel metaDataDetailsPanel;
 	private List<SQLConsoleWithTitle> sqlConsoles = new ArrayList<SQLConsoleWithTitle>();
@@ -3812,8 +4068,8 @@ public class DataBrowser extends javax.swing.JFrame {
 		workbenchTabbedPane.setSelectedComponent(desktopSplitPane);
 	}
 
-	private void initDnD() {
-		new DropTarget(this, new DropTargetListener() {
+	private void initDnD(Component target) {
+		new DropTarget(target, new DropTargetListener() {
 			@Override
 			public void drop(DropTargetDropEvent dtde) {
 				try {
@@ -3857,6 +4113,14 @@ public class DataBrowser extends javax.swing.JFrame {
 		});
 	}
 	
+	public boolean isReady() {
+		return session != null;
+	}
+	
+	public SQLConsole getSqlConsole(boolean switchToConsole) {
+		return desktop.getSqlConsole(switchToConsole);
+	}
+
 	private DesktopAnchorManager anchorManager; 
 	
 	private ImageIcon tableIcon;

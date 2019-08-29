@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,14 +47,10 @@ import net.sf.jailer.database.Session;
  */
 public class CellContentConverter {
 
-	/**
-	 * All hex digits.
-	 */
-	private static final char[] hexChar = new char[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
-	
 	private final ResultSetMetaData resultSetMetaData;
 	private final Map<Integer, Integer> typeCache = new HashMap<Integer, Integer>();
 	private final Map<String, Integer> columnIndex = new HashMap<String, Integer>();
+	private final Map<Class<?>, Boolean> isPGObjectClass = new HashMap<Class<?>, Boolean>();
 	private final Session session;
 	private final DBMS configuration;
 	private final DBMS targetConfiguration;
@@ -134,18 +130,25 @@ public class CellContentConverter {
 		if (content instanceof Time) {
 			return "'" + content + "'";
 		}
-		if (content.getClass().getSimpleName().equals("PGobject")) {
-			try {
-				if (pgObjectGetType == null) {
-					pgObjectGetType = content.getClass().getMethod("getType");
+		if (DBMS.POSTGRESQL.equals(configuration)) {
+			Boolean isPGObject = isPGObjectClass.get(content.getClass());
+			if (isPGObject == null) {
+				isPGObject = content.getClass().getSimpleName().equals("PGobject");
+				isPGObjectClass.put(content.getClass(), isPGObject);
+			}
+			if (isPGObject) {
+				try {
+					if (pgObjectGetType == null) {
+						pgObjectGetType = content.getClass().getMethod("getType");
+					}
+					if ("varbit".equalsIgnoreCase((String) pgObjectGetType.invoke(content))) {
+						// PostgreSQL bit values
+						return "B'" + content + "'";
+					}
+					return "'" + targetConfiguration.convertToStringLiteral(content.toString()) + "'";
+				} catch (Exception e) {
+					throw new RuntimeException(e);
 				}
-				if ("varbit".equalsIgnoreCase((String) pgObjectGetType.invoke(content))) {
-					// PostgreSQL bit values
-					return "B'" + content + "'";
-				}
-				return "'" + targetConfiguration.convertToStringLiteral(content.toString()) + "'";
-			} catch (Exception e) {
-				throw new RuntimeException(e);
 			}
 		}
 		if (content instanceof UUID) {
@@ -154,8 +157,8 @@ public class CellContentConverter {
 			}
 			return "'" + content + "'";
 		}
-		if (targetConfiguration.isIdentityInserts()) {
-			// Boolean mapping for MSSQL/Sybase
+		if (DBMS.MSSQL.equals(targetConfiguration) || DBMS.SYBASE.equals(targetConfiguration) || DBMS.SQLITE.equals(targetConfiguration)) {
+			// Boolean mapping for MSSQL/Sybase/SQLite
 			if (content instanceof Boolean) {
 				content = Boolean.TRUE.equals(content)? "1" : "0";
 			}
@@ -503,4 +506,9 @@ public class CellContentConverter {
 		return null;
 	}
 
+	/**
+	 * All hex digits.
+	 */
+	public static final char[] hexChar = new char[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+	
 }

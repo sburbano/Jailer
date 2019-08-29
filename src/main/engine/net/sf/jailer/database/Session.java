@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.sql.DataSource;
 
@@ -217,8 +219,8 @@ public class Session {
 	 * @param dataSource the data source
 	 * @param dbms the DBMS
 	 */
-	public Session(DataSource dataSource, DBMS dbms) throws SQLException {
-		this(dataSource, dbms, null, false);
+	public Session(DataSource dataSource, DBMS dbms, Integer isolationLevel) throws SQLException {
+		this(dataSource, dbms, isolationLevel, null, false);
 	}
 
 	/**
@@ -227,8 +229,8 @@ public class Session {
 	 * @param dataSource the data source
 	 * @param dbms the DBMS
 	 */
-	public Session(DataSource dataSource, DBMS dbms, final WorkingTableScope scope, boolean transactional) throws SQLException {
-		this(dataSource, dbms, scope, transactional, false);
+	public Session(DataSource dataSource, DBMS dbms, Integer isolationLevel, final WorkingTableScope scope, boolean transactional) throws SQLException {
+		this(dataSource, dbms, isolationLevel, scope, transactional, false);
 	}
 	
 	/**
@@ -238,7 +240,7 @@ public class Session {
 	 * @param dbms the DBMS
 	 * @param local <code>true</code> for the local entity-graph database
 	 */
-	public Session(final DataSource dataSource, DBMS dbms, final WorkingTableScope scope, boolean transactional, final boolean local) throws SQLException {
+	public Session(final DataSource dataSource, DBMS dbms, final Integer isolationLevel, final WorkingTableScope scope, boolean transactional, final boolean local) throws SQLException {
 		this.transactional = transactional;
 		this.local = local;
 		this.scope = scope;
@@ -247,31 +249,31 @@ public class Session {
 		this.dbUrl = (dataSource instanceof BasicDataSource)? ((BasicDataSource) dataSource).dbUrl : null;
 		this.schema = (dataSource instanceof BasicDataSource)? ((BasicDataSource) dataSource).dbUser : "";
 		this.temporaryTableScope = scope;
-
+		
 		connectionFactory = new ConnectionFactory() {
 			private Connection defaultConnection = null;
 			private Random random = new Random();
 			@Override
-			public Connection getConnection() throws SQLException {
+			public synchronized Connection getConnection() throws SQLException {
 				@SuppressWarnings("resource")
 				Connection con = local? connection.get() : temporaryTableSession == null? connection.get() : temporaryTableSession;
-				
+
+				if (con == null && Boolean.TRUE.equals(sharesConnection.get())) {
+					con = defaultConnection;
+				}
+
 				if (con == null) {
 					try {
 						con = dataSource.getConnection();
-						synchronized (this) {
-							defaultConnection = con;
-						}
+						defaultConnection = con;
 					} catch (SQLException e) {
-						synchronized (this) {
-							if (connections != null && connections.size() > 1) {
-								con = connections.get(random.nextInt(connections.size()));
-							} else if (defaultConnection != null) {
-								// fall back to default connection
-								con = defaultConnection;
-							} else {
-								throw e;
-							}
+						if (connections != null && connections.size() > 1) {
+							con = connections.get(random.nextInt(connections.size()));
+						} else if (defaultConnection != null) {
+							// fall back to default connection
+							con = defaultConnection;
+						} else {
+							throw e;
 						}
 					}
 					boolean ac = scope == null || scope != WorkingTableScope.TRANSACTION_LOCAL;
@@ -281,21 +283,15 @@ public class Session {
 					_log.info("set auto commit to " + ac);
 					con.setAutoCommit(ac);
 					try {
-						DatabaseMetaData meta = con.getMetaData();
-						String productName = meta.getDatabaseProductName();
-						if (productName != null) {
-							if ((!"ASE".equals(productName)) && !productName.toUpperCase().contains("ADAPTIVE SERVER")) {
-								// Sybase don't handle UR level correctly, see http://docs.sun.com/app/docs/doc/819-4728/gawlc?a=view
-								if (!productName.toUpperCase().startsWith("HSQL")) {
-									// HSQL don't allow write access at UR level
-									con.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
-								}
-							  }
+						if (isolationLevel != null) {
+							_log.info("set isolation level to " + isolationLevel);
+							con.setTransactionIsolation(isolationLevel);
+							_log.info("isolation level is " + con.getTransactionIsolation());
 						}
 					} catch (SQLException e) {
-						_log.info("can't set isolation level to UR. Reason: " + e.getMessage());
+						_log.warn("can't set isolation level to UR. Reason: " + e.getMessage());
 					}
-					if (scope == WorkingTableScope.SESSION_LOCAL || scope == WorkingTableScope.TRANSACTION_LOCAL) {
+					if ((Session.this.transactional && !local) || scope == WorkingTableScope.SESSION_LOCAL || scope == WorkingTableScope.TRANSACTION_LOCAL) {
 						temporaryTableSession = con;
 					} else {
 						connection.set(con);
@@ -328,13 +324,22 @@ public class Session {
 	/**
 	 * Closes current connection and opens a new one.
 	 */
-	public void reconnect() throws SQLException {
+	public void reconnect() {
 		Connection con = connection.get();
 		if (con != null) {
 			if (temporaryTableScope == WorkingTableScope.TRANSACTION_LOCAL) {
-				con.commit();
+				try {
+					con.commit();
+				} catch (SQLException e) {
+					// ignore
+				}
 			}
-			con.close();
+			try {
+				con.close();
+			// catch all because ucanaccess throws non-SQLException
+			} catch (Throwable e) { // SQLException e) {
+				// ignore
+			}
 			connection.set(null);
 			if (con == temporaryTableSession) {
 				temporaryTableSession = null;
@@ -343,9 +348,18 @@ public class Session {
 		}
 		if (temporaryTableSession != null) {
 			if (temporaryTableScope == WorkingTableScope.TRANSACTION_LOCAL) {
-				temporaryTableSession.commit();
+				try {
+					temporaryTableSession.commit();
+				} catch (SQLException e) {
+					// ignore
+				}
 			}
-			temporaryTableSession.close();
+			try {
+				temporaryTableSession.close();
+				// catch all because ucanaccess throws non-SQLException
+			} catch (Throwable e) { // SQLException e) {
+				// ignore
+			}
 			temporaryTableSession = null;
 		}
 	}
@@ -401,7 +415,7 @@ public class Session {
 			DatabaseMetaData meta = connection.getMetaData();
 			_log.info("driver name:    " + meta.getDriverName());
 			_log.info("driver version: " + meta.getDriverVersion());
-			_log.info("DB name:        " + meta.getDatabaseProductName() + " (" + dbms + ")");
+			_log.info("DB name:        " + meta.getDatabaseProductName() + (dbms.getDisplayName() != null? " (" + dbms.getDisplayName() + ")" : ""));
 			_log.info("DB version:     " + meta.getDatabaseProductVersion());
 		} catch (Exception e) {
 			// ignore exceptions
@@ -422,9 +436,20 @@ public class Session {
 	 * 
 	 * @param sqlQuery the query in SQL
 	 * @param reader the reader for the result
+	 * @param withExplicitCommit if <code>true</code>, switch of autocommit and commit explicitly
+	 */
+	public long executeQuery(String sqlQuery, ResultSetReader reader, boolean withExplicitCommit) throws SQLException {
+		return executeQuery(sqlQuery, reader, null, null, 0, withExplicitCommit);
+	}
+	
+	/**
+	 * Executes a SQL-Query (SELECT).
+	 * 
+	 * @param sqlQuery the query in SQL
+	 * @param reader the reader for the result
 	 */
 	public long executeQuery(String sqlQuery, ResultSetReader reader) throws SQLException {
-		return executeQuery(sqlQuery, reader, null, null, 0);
+		return executeQuery(sqlQuery, reader, null, null, 0, false);
 	}
 	
 	/**
@@ -435,9 +460,23 @@ public class Session {
 	 * @param alternativeSQL query to be executed if sqlQuery fails
 	 * @param limit row limit, 0 for unlimited
 	 * @param context cancellation context
+	 * @param withExplicitCommit if <code>true</code>, switch of autocommit and commit explicitly
+	 */
+	public long executeQuery(String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit, boolean withExplicitCommit) throws SQLException {
+		return executeQuery(sqlQuery, reader, alternativeSQL, context, limit, 0, withExplicitCommit);
+	}
+
+	/**
+	 * Executes a SQL-Query (SELECT).
+	 * 
+	 * @param sqlQuery the query in SQL
+	 * @param reader the reader for the result
+	 * @param alternativeSQL query to be executed if sqlQuery fails
+	 * @param limit row limit, 0 for unlimited
+	 * @param context cancellation context
 	 */
 	public long executeQuery(String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit) throws SQLException {
-		return executeQuery(sqlQuery, reader, alternativeSQL, context, limit, 0);
+		return executeQuery(sqlQuery, reader, alternativeSQL, context, limit, 0, false);
 	}
 
 	/**
@@ -450,13 +489,37 @@ public class Session {
 	 * @param limit row limit, 0 for unlimited
 	 * @param context cancellation context
 	 * @param timeout the timeout in sec
+	 * @param withExplicitCommit if <code>true</code>, switch of autocommit and commit explicitly
 	 */
-	private long executeQuery(Connection theConnection, String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit, int timeout) throws SQLException {
+	private long executeQuery(Connection theConnection, String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit, int timeout, boolean withExplicitCommit) throws SQLException {
+		if (withExplicitCommit) {
+			synchronized (theConnection) {
+				if (theConnection.getAutoCommit()) {
+					try {
+						theConnection.setAutoCommit(false);
+						return executeQuery(theConnection, sqlQuery, reader, alternativeSQL, context, limit, timeout, false);
+					} finally {
+						try {
+							theConnection.commit();
+						} catch (SQLException e) {
+							_log.warn("commit failed", e);
+						}
+						theConnection.setAutoCommit(true);
+					}
+				}
+			}
+		}
 		long rc = 0;
 		CancellationHandler.checkForCancellation(context);
+		long startTime = System.currentTimeMillis();
 		Statement statement = null;
 		try {
 			statement = theConnection.createStatement();
+			if (dbms != null) {
+				if (dbms.getFetchSize() != null) {
+					statement.setFetchSize(dbms.getFetchSize());
+				}
+			}
 			CancellationHandler.begin(statement, context);
 			ResultSet resultSet;
 			try {
@@ -500,7 +563,7 @@ public class Session {
 			}
 		}
 		if (getLogStatements()) {
-			_log.info(rc + " row(s)");
+			_log.info(rc + " row(s) in " + (System.currentTimeMillis() - startTime) + " ms");
 		}
 		return rc;
 	}
@@ -514,13 +577,14 @@ public class Session {
 	 * @param limit row limit, 0 for unlimited
 	 * @param context cancellation context
 	 * @param timeout the timeout in sec
+	 * @param withExplicitCommit if <code>true</code>, switch of autocommit and commit explicitly
 	 */
-	public long executeQuery(String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit, int timeout) throws SQLException {
+	public long executeQuery(String sqlQuery, ResultSetReader reader, String alternativeSQL, Object context, int limit, int timeout, boolean withExplicitCommit) throws SQLException {
 		if (getLogStatements()) {
 			_log.info(sqlQuery);
 		}
 		try {
-			return executeQuery(connectionFactory.getConnection(), sqlQuery, reader, alternativeSQL, context, limit, timeout);
+			return executeQuery(connectionFactory.getConnection(), sqlQuery, reader, alternativeSQL, context, limit, timeout, withExplicitCommit);
 		} catch (SQLException e) {
 			CancellationHandler.checkForCancellation(context);
 			if (!silent) {
@@ -538,8 +602,9 @@ public class Session {
 	 * 
 	 * @param sqlFile file containing a query in SQL
 	 * @param reader the reader for the result
+	 * @param withExplicitCommit if <code>true</code>, switch of autocommit and commit explicitly
 	 */
-	public void executeQuery(File sqlFile, ResultSetReader reader) throws SQLException {
+	public void executeQuery(File sqlFile, ResultSetReader reader, boolean withExplicitCommit) throws SQLException {
 		StringBuffer result = new StringBuffer();
 		try {
 			BufferedReader in = new BufferedReader(new FileReader(sqlFile));
@@ -554,14 +619,15 @@ public class Session {
 			throw new RuntimeException("Failed to load content of file", e);
 		}
 
-		executeQuery(result.toString(), reader);
+		executeQuery(result.toString(), reader, withExplicitCommit);
 	}
 
 	/**
-	 * Lock for prevention of livelocks.
+	 * Prevention of livelocks.
 	 */
-	private static final Object DB_LOCK = new String("DB_LOCK");
-	
+	private final int PERMITS = Integer.MAX_VALUE / 4;
+	private Semaphore semaphore = new Semaphore(PERMITS);
+
 	/**
 	 * Executes a SQL-Update (INSERT, DELETE or UPDATE).
 	 * 
@@ -574,37 +640,76 @@ public class Session {
 			_log.info(sqlUpdate);
 		}
 		CancellationHandler.checkForCancellation(null);
+		final int maximumNumberOfFailures = 10;
 		try {
 			int rowCount = 0;
 			int failures = 0;
 			boolean ok = false;
 			boolean serializeAccess = false;
+
 			while (!ok) {
+				long startTime = System.currentTimeMillis();
 				Statement statement = null;
 				try {
 					statement = connectionFactory.getConnection().createStatement();
 					CancellationHandler.begin(statement, null);
 					if (serializeAccess) {
-						synchronized (DB_LOCK) {
+						boolean acquired;
+						try {
+							semaphore.acquire(PERMITS);
+							acquired = true;
+						} catch (InterruptedException e) {
+							acquired = false;
+						}
+
+						try {
 							rowCount = statement.executeUpdate(sqlUpdate);
+						} finally {
+							if (acquired) {
+								semaphore.release(PERMITS);
+							}
 						}
 					} else {
-						rowCount = statement.executeUpdate(sqlUpdate);
+						boolean acquired;
+						try {
+							semaphore.acquire(1);
+							acquired = true;
+						} catch (InterruptedException e) {
+							acquired = false;
+						}
+
+						try {
+							rowCount = statement.executeUpdate(sqlUpdate);
+						} finally {
+							if (acquired) {
+								semaphore.release(1);
+							}
+						}
 					}
+
 					CancellationHandler.end(statement, null);
 					ok = true;
 					if (getLogStatements()) {
-						_log.info("" + rowCount + " row(s)");
+						_log.info("" + rowCount + " row(s) in " + (System.currentTimeMillis() - startTime) + " ms");
 					}
 				} catch (SQLException e) {
 					CancellationHandler.checkForCancellation(null);
 					CancellationHandler.end(statement, null);
-					if (++failures > 10 || (e.getErrorCode() != -911 && e.getErrorCode() != 8176)) {
+
+					boolean deadlock = "40001".equals(e.getSQLState()); // "serialization failure", see https://en.wikipedia.org/wiki/SQLSTATE
+					boolean crf = DBMS.ORACLE.equals(dbms) && e.getErrorCode() == 8176; // ORA-08176: consistent read failure; rollback data not available
+					
+					if (++failures > maximumNumberOfFailures || !(deadlock || crf)) {
 						throw new SqlException("\"" + e.getMessage() + "\" in statement \"" + sqlUpdate + "\"", sqlUpdate, e);
 					}
 					// deadlock
 					serializeAccess = true;
-					_log.info("Deadlock! Try again.");
+					_log.info("Deadlock! Try again...");
+					try {
+						Thread.sleep(140);
+					} catch (InterruptedException e1) {
+						// ignore
+					}
 				} finally {
 					if (statement != null) {
 						try { statement.close(); } catch (SQLException e) { }
@@ -642,6 +747,7 @@ public class Session {
 		try {
 			CancellationHandler.checkForCancellation(null);
 			int rowCount = 0;
+			long startTime = System.currentTimeMillis();
 			PreparedStatement statement = null;
 			try {
 				statement = connectionFactory.getConnection().prepareStatement(sqlUpdate);
@@ -653,7 +759,7 @@ public class Session {
 				rowCount = statement.executeUpdate();
 				CancellationHandler.end(statement, null);
 				if (getLogStatements()) {
-					_log.info("" + rowCount + " row(s)");
+					_log.info("" + rowCount + " row(s) in " + (System.currentTimeMillis() - startTime) + " ms");
 				}
 			} finally {
 				if (statement != null) {
@@ -775,6 +881,7 @@ public class Session {
 			_log.info(sql);
 		}
 		long rc = 0;
+		long startTime = System.currentTimeMillis();
 		Statement statement = null;
 		try {
 			CancellationHandler.checkForCancellation(cancellationContext);
@@ -782,7 +889,7 @@ public class Session {
 			CancellationHandler.begin(statement, cancellationContext);
 			rc = statement.executeUpdate(sql);
 			if (getLogStatements()) {
-				_log.info("" + rc + " row(s)");
+				_log.info("" + rc + " row(s) in " + (System.currentTimeMillis() - startTime) + " ms");
 			}
 		} catch (SQLException e) {
 			CancellationHandler.checkForCancellation(cancellationContext);
@@ -816,6 +923,14 @@ public class Session {
 	public DatabaseMetaData getMetaData() throws SQLException {
 		Connection con = connectionFactory.getConnection();
 		DatabaseMetaData mData = metaData.get(con);
+		if (mData != null) {
+			try {
+				// is meta data still valid?
+				mData.getIdentifierQuoteString();
+			} catch (SQLException e) {
+				mData = null;
+			}
+		}
 		if (mData == null) {
 			mData = con.getMetaData();
 			metaData.put(con, mData);
@@ -823,18 +938,29 @@ public class Session {
 		return mData;
 	}
 
+	protected AtomicBoolean down = new AtomicBoolean(false);
+
 	/**
 	 * Closes all connections.
 	 */
 	public void shutDown() throws SQLException {
-		_log.info("closing connection...");
+		down.set(true);
+		_log.info("closing connections... (" + connections.size() + ")");
 		for (Connection con: connections) {
-			con.close();
+			try {
+				con.close();
+			} catch (Exception e) {
+				// ignore
+			}
 		}
 		closeTemporaryTableSession();
 		_log.info("connection closed");
 	}
-	
+
+	public boolean isDown() {
+		return down.get();
+	}
+
 	/**
 	 * Rolls back and closes all connections.
 	 */
@@ -851,6 +977,13 @@ public class Session {
 				_log.warn(e.getMessage());
 			}
 		}
+		if (temporaryTableSession != null) {
+			try {
+				temporaryTableSession.rollback();
+			} catch(SQLException e) {
+				_log.warn(e.getMessage());
+			}
+		 }
 		connection = new ThreadLocal<Connection>();
 	}
 	
@@ -861,6 +994,13 @@ public class Session {
 		for (Connection con: connections) {
 			try {
 				con.commit();
+			} catch(SQLException e) {
+				_log.warn(e.getMessage());
+			}
+		}
+		if (temporaryTableSession != null) {
+			try {
+				temporaryTableSession.commit();
 			} catch(SQLException e) {
 				_log.warn(e.getMessage());
 			}
@@ -897,7 +1037,7 @@ public class Session {
 				temporaryTableSession.close();
 			}
 		} catch(SQLException e) {
-			_log.error("can't close connection", e);
+			_log.warn("can't close connection", e);
 		}
 		temporaryTableSession = null;
 	}
@@ -981,7 +1121,7 @@ public class Session {
 	public void setSessionProperty(Class<?> owner, String name, Object property) {
 		sessionProperty.put(owner.getName() + "." + name, property);
 	}
-	
+
 	/**
 	 * Gets a session property.
 	 * 
@@ -1025,6 +1165,12 @@ public class Session {
 			return false;
 		}
 		return true;
+	}
+
+	private final static ThreadLocal<Boolean> sharesConnection = new ThreadLocal<Boolean>();
+	
+	public static void setThreadSharesConnection() {
+		sharesConnection.set(true);
 	}
 
 }

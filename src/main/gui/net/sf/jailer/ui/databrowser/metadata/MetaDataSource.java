@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.log4j.Logger;
 
@@ -63,7 +64,7 @@ public class MetaDataSource {
 	 * Schemas.
 	 */
 	private List<MDSchema> schemas = new ArrayList<MDSchema>();
-	
+
 	/**
 	 * Constructor.
 	 * 
@@ -78,7 +79,6 @@ public class MetaDataSource {
 		this.quoting = new Quoting(session);
 		
 		initTableMapping(dataModel);
-		readSchemas();
 	}
 
 	private void initTableMapping(DataModel dataModel) {
@@ -102,8 +102,18 @@ public class MetaDataSource {
 		}
 		return Quoting.staticUnquote(schema) + "." + Quoting.staticUnquote(t.getUnqualifiedName());
 	}
+
+	private AtomicBoolean initialized = new AtomicBoolean(false);
+
+	public boolean isInitialized() {
+		return initialized.get();
+	}
 	
-	private void readSchemas() {
+	private synchronized void readSchemas() {
+		if (initialized.get()) {
+			return;
+		}
+
 		Object md = new Object();
 		try {
 			md = session.getMetaData();
@@ -124,6 +134,7 @@ public class MetaDataSource {
 				}
 			}
 		}
+		initialized.set(true);
 	}
 
 	ResultSet readTables(String schemaPattern) throws SQLException {
@@ -138,7 +149,8 @@ public class MetaDataSource {
 	/**
 	 * @return the schemas
 	 */
-	public List<MDSchema> getSchemas() {
+	public synchronized List<MDSchema> getSchemas() {
+		readSchemas();
 		return schemas;
 	}
 
@@ -157,7 +169,7 @@ public class MetaDataSource {
 	/**
 	 * Removes all chached data.
 	 */
-	public void clear() {
+	public synchronized void clear() {
     	for (MDSchema mdSchema: schemas) {
     		mdSchema.setValid(false);
     	}
@@ -165,7 +177,8 @@ public class MetaDataSource {
     	mDTableToTable.clear();
     	tableToMDTable.clear();
     	schemaPerUnquotedNameUC.clear();
-		readSchemas();
+    	initialized.set(false);
+    	readSchemas();
 	}
 
 	/**
@@ -218,6 +231,32 @@ public class MetaDataSource {
     	return table;
     }
 
+    public MDSchema getSchemaOfTable(Table table) {
+    	MDSchema defaultSchema = getDefaultSchema();
+    	if (defaultSchema != null) {
+    		String schemaName = Quoting.staticUnquote(table.getSchema(defaultSchema.getName()));
+    		String schemaNameUC = schemaName.toUpperCase(Locale.ENGLISH);
+
+    		MDSchema schemaExact = null;
+    		MDSchema schemaIC = null;
+    		for (MDSchema schema: getSchemas()) {
+    			if (schema.getName().equals(schemaName)) {
+    				schemaExact = schema;
+    				break;
+    			}
+    			if (schema.getName().toUpperCase(Locale.ENGLISH).equals(schemaNameUC)) {
+    				schemaIC = schema;
+    			}
+    		}
+    		if (schemaExact != null) {
+    			return schemaExact;
+    		} else if (schemaIC != null) {
+    			return schemaIC;
+    		}
+    	}
+    	return null;
+    }
+    
     public MDTable toMDTable(Table table) {
     	if (tableToMDTable.containsKey(table)) {
     		return tableToMDTable.get(table);

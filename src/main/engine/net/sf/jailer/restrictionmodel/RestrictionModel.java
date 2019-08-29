@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -232,7 +232,7 @@ public class RestrictionModel {
 	public void addRestriction(Table source, Association association, String condition, String location, Map<String, String> parameters) {
 		addRestriction(source, association, condition, location, false, parameters);
 	}
-		
+
 	/**
 	 * Adds a restriction to a association.
 	 * 
@@ -241,8 +241,10 @@ public class RestrictionModel {
 	 * @param location location in CSV-file
 	 * @param parameters apply this parameter-value mapping to all restriction conditions 
 	 * @param removePreviousRestriction if <code>true</code>, remove any restriction on the association before adding the new one
+	 * 
+	 * @return <code>true</code> iff null filter has been removed
 	 */
-	public void addRestriction(Table source, Association association, String condition, String location, boolean removePreviousRestriction, Map<String, String> parameters) {
+	public boolean addRestriction(Table source, Association association, String condition, String location, boolean removePreviousRestriction, Map<String, String> parameters) {
 		if (dataModel != null) {
 			dataModel.version++;
 		}
@@ -272,9 +274,10 @@ public class RestrictionModel {
 		}
 		if (!association.isIgnored()) {
 			if (association.hasNullableFK() && association.fkHasNullFilter()) {
-				association.setOrResetFKNullFilter(false);
+				return association.setOrResetFKNullFilter(false);
 			}
 		}
+		return false;
 	}
 
 	/**

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,10 @@ import net.sf.jailer.database.TemporaryTableManager;
 import net.sf.jailer.database.WorkingTableScope;
 import net.sf.jailer.datamodel.Column;
 import net.sf.jailer.datamodel.DataModel;
+import net.sf.jailer.datamodel.PrimaryKey;
+import net.sf.jailer.datamodel.PrimaryKeyFactory;
 import net.sf.jailer.datamodel.RowIdSupport;
+import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.util.PrintUtil;
 import net.sf.jailer.util.Quoting;
 import net.sf.jailer.util.SqlScriptExecutor;
@@ -72,10 +75,10 @@ public class DDLCreator {
 	public boolean createDDL(DataSource dataSource, DBMS dbms, WorkingTableScope temporaryTableScope, String workingTableSchema) throws SQLException, FileNotFoundException, IOException {
 		Session session = null;
 		if (dataSource != null) {
-			session = new Session(dataSource, dbms);
+			session = new Session(dataSource, dbms, executionContext.getIsolationLevel());
 		}
 		try {
-			return createDDL(new DataModel(executionContext), session, temporaryTableScope, workingTableSchema);
+			return createDDL(new DataModel(null, null, new HashMap<String, String>(), null, new PrimaryKeyFactory(executionContext), executionContext, true, null), session, temporaryTableScope, workingTableSchema);
 		} finally {
 			if (session != null) {
 				try { session.shutDown(); } catch (Exception e) { /* ignore */ }
@@ -87,6 +90,9 @@ public class DDLCreator {
 	 * Creates the DDL for the working-tables.
 	 */
 	public void createDDL(Session localSession, WorkingTableScope temporaryTableScope, String workingTableSchema) throws FileNotFoundException, IOException, SQLException {
+		// TODO register all current export processes.
+		// Fail if a process is still active.
+		// Use a heard beat concept to detect dead processes 
 		createDDL(new DataModel(executionContext), localSession, temporaryTableScope, workingTableSchema);
 	}
 
@@ -102,21 +108,45 @@ public class DDLCreator {
 	 * Creates the DDL for the working-tables.
 	 */
 	public boolean createDDL(DataModel datamodel, Session session, WorkingTableScope temporaryTableScope, RowIdSupport rowIdSupport, String workingTableSchema) throws FileNotFoundException, IOException, SQLException {
+		try {
+			return createDDL(datamodel, session, temporaryTableScope, rowIdSupport, workingTableSchema, true);
+		} catch (SQLException e) {
+			// try without table property
+		}
+		return createDDL(datamodel, session, temporaryTableScope, rowIdSupport, workingTableSchema, false);
+	}
+
+	/**
+	 * Creates the DDL for the working-tables.
+	 */
+	public boolean createDDL(DataModel datamodel, Session session, WorkingTableScope temporaryTableScope, RowIdSupport rowIdSupport, String workingTableSchema, boolean withTableProperties) throws FileNotFoundException, IOException, SQLException {
 		uPKWasTooLong = false;
 		try {
-			return createDDL(datamodel, session, temporaryTableScope, 0, rowIdSupport, workingTableSchema);
+			return createDDL(datamodel, session, temporaryTableScope, 0, rowIdSupport, workingTableSchema, withTableProperties);
 		} catch (SQLException e) {
 			uPKWasTooLong = true;
+			try {
+				// [bugs:#37] PostreSQL: transactional execution
+				session.getConnection().commit();
+			} catch (SQLException e1) {
+				// ignore
+			}
 		}
 		// reconnect and retry with another index type
 		session.reconnect();
 		try {
-			return createDDL(datamodel, session, temporaryTableScope, 1, rowIdSupport, workingTableSchema);
+			return createDDL(datamodel, session, temporaryTableScope, 1, rowIdSupport, workingTableSchema, withTableProperties);
 		} catch (SQLException e) {
+			try {
+				// [bugs:#37] PostreSQL: transactional execution
+				session.getConnection().commit();
+			} catch (SQLException e1) {
+				// ignore
+			}
 		}
 		// reconnect and retry with another index type
 		session.reconnect();
-		return createDDL(datamodel, session, temporaryTableScope, 2, rowIdSupport, workingTableSchema);
+		return createDDL(datamodel, session, temporaryTableScope, 2, rowIdSupport, workingTableSchema, withTableProperties);
 	}
 
 	public static boolean uPKWasTooLong = false;
@@ -124,17 +154,29 @@ public class DDLCreator {
 	/**
 	 * Creates the DDL for the working-tables.
 	 */
-	private boolean createDDL(DataModel dataModel, Session session, WorkingTableScope temporaryTableScope, int indexType, RowIdSupport rowIdSupport, String workingTableSchema) throws FileNotFoundException, IOException, SQLException {
+	private boolean createDDL(DataModel dataModel, Session session, WorkingTableScope temporaryTableScope, int indexType, RowIdSupport rowIdSupport, String workingTableSchema, boolean withTableProperties) throws FileNotFoundException, IOException, SQLException {
 		String template = "script" + File.separator + "ddl-template.sql";
 		String contraint = pkColumnConstraint(session);
 		Map<String, String> typeReplacement = targetDBMS(session).getTypeReplacement();
-		String universalPrimaryKey = rowIdSupport.getUniversalPrimaryKey().toSQL(null, contraint, typeReplacement);
+		PrimaryKey upk = rowIdSupport.getUniversalPrimaryKey();
+		if (upk.getColumns().isEmpty()) {
+			Table table = null;
+			if (executionContext.getUpkDomain() != null) {
+				for (String tableName: executionContext.getUpkDomain()) {
+					table = dataModel.getTable(tableName);
+					break;
+				}
+			}
+			throw new DataModel.NoPrimaryKeyException(table);
+		}
+		String universalPrimaryKey = upk.toSQL(null, contraint, typeReplacement);
 		Map<String, String> arguments = new HashMap<String, String>();
 		arguments.put("upk", universalPrimaryKey);
-		arguments.put("upk-hash", "" + ((universalPrimaryKey + targetDBMS(session).getTableProperties()).hashCode()));
-		arguments.put("pre", rowIdSupport.getUniversalPrimaryKey().toSQL("PRE_", contraint, typeReplacement));
-		arguments.put("from", rowIdSupport.getUniversalPrimaryKey().toSQL("FROM_", contraint, typeReplacement));
-		arguments.put("to", rowIdSupport.getUniversalPrimaryKey().toSQL("TO_", contraint, typeReplacement));
+		String tableProperties = targetDBMS(session).getTableProperties();
+		arguments.put("upk-hash", "" + ((universalPrimaryKey + tableProperties).hashCode()));
+		arguments.put("pre", upk.toSQL("PRE_", contraint, typeReplacement));
+		arguments.put("from", upk.toSQL("FROM_", contraint, typeReplacement));
+		arguments.put("to", upk.toSQL("TO_", contraint, typeReplacement));
 		arguments.put("version", "" + JailerVersion.WORKING_TABLE_VERSION);
 		arguments.put("constraint", contraint);
 
@@ -160,10 +202,19 @@ public class DDLCreator {
 			arguments.put("index-table-prefix", tableManager.getIndexTablePrefix());
 			arguments.put("schema", schema + tableManager.getDdlTableReferencePrefix());
 		} else {
+			String suffix = "";
+			String prefix = "";
+			if (withTableProperties) {
+				prefix = tableProperties.replaceFirst("^\\s*CREATE\\s+(.*)\\s+TABLE\\s*$", "$1");
+				if (prefix.equals(tableProperties)) {
+					prefix = "";
+					suffix = tableProperties;
+				}
+			}
 			arguments.put("table-suffix", "");
 			arguments.put("drop-table", "DROP TABLE ");
-			arguments.put("create-table", "CREATE TABLE ");
-			arguments.put("create-table-suffix", targetDBMS(session).getTableProperties());
+			arguments.put("create-table", !"".equals(prefix)? "CREATE " + prefix + " TABLE " : "CREATE TABLE ");
+			arguments.put("create-table-suffix", suffix);
 			arguments.put("create-index", "CREATE INDEX ");
 			arguments.put("create-index-suffix", "");
 			arguments.put("index-table-prefix", "");
@@ -172,15 +223,15 @@ public class DDLCreator {
 		Map<String, List<String>> listArguments = new HashMap<String, List<String>>();
 		if (indexType == 0) {
 			// full index
-			listArguments.put("column-list", Collections.singletonList(", " + rowIdSupport.getUniversalPrimaryKey().columnList(null)));
-			listArguments.put("column-list-from", Collections.singletonList(", " + rowIdSupport.getUniversalPrimaryKey().columnList("FROM_")));
-			listArguments.put("column-list-to", Collections.singletonList(", " + rowIdSupport.getUniversalPrimaryKey().columnList("TO_")));
+			listArguments.put("column-list", Collections.singletonList(", " + upk.columnList(null)));
+			listArguments.put("column-list-from", Collections.singletonList(", " + upk.columnList("FROM_")));
+			listArguments.put("column-list-to", Collections.singletonList(", " + upk.columnList("TO_")));
 		} else if (indexType == 1) {
 			// single column indexes
 			List<String> cl = new ArrayList<String>();
 			List<String> clFrom = new ArrayList<String>();
 			List<String> clTo = new ArrayList<String>();
-			for (Column c : rowIdSupport.getUniversalPrimaryKey().getColumns()) {
+			for (Column c : upk.getColumns()) {
 				cl.add(", " + c.name);
 				clFrom.add(", FROM_" + c.name);
 				clTo.add(", FROM_" + c.name);
@@ -253,7 +304,7 @@ public class DDLCreator {
 	public boolean isUptodate(DataSource dataSource, DBMS dbms, boolean useRowId, String workingTableSchema) {
 		try {
 			if (dataSource != null) {
-				final Session session = new Session(dataSource, dbms);
+				final Session session = new Session(dataSource, dbms, executionContext.getIsolationLevel());
 				try {
 					return isUptodate(session, useRowId, workingTableSchema);
 				} finally {
@@ -315,13 +366,19 @@ public class DDLCreator {
 					String testId = "ID:" + System.currentTimeMillis();
 					session.executeUpdate(
 							"INSERT INTO " + schema + SQLDialect.CONFIG_TABLE_ + "(jversion, jkey, jvalue) " +
-							"VALUES (" + JailerVersion.WORKING_TABLE_VERSION + ", '" + testId + "', 'ok')");
+							"VALUES ('" + JailerVersion.WORKING_TABLE_VERSION + "', '" + testId + "', 'ok')");
 					session.executeUpdate(
 							"DELETE FROM " + schema + SQLDialect.CONFIG_TABLE_ + " " +
-							"WHERE jversion=" + JailerVersion.WORKING_TABLE_VERSION + " and jkey='" + testId + "'");
+							"WHERE jversion='" + JailerVersion.WORKING_TABLE_VERSION + "' and jkey='" + testId + "'");
 				}
 				return uptodate[0];
 			} catch (Exception e) {
+				try {
+					// [bugs:#37] PostreSQL: transactional execution
+					session.getConnection().commit();
+				} catch (SQLException e1) {
+					// ignore
+				}
 				return false;
 			} finally {
 				session.setSilent(wasSilent);
@@ -330,7 +387,6 @@ public class DDLCreator {
 			return false;
 		}
 	}
-
 
 	/**
 	 * Checks whether working-tables schema is present.
@@ -353,6 +409,12 @@ public class DDLCreator {
 					});
 				return uptodate[0];
 			} catch (Exception e) {
+				try {
+					// [bugs:#37] PostreSQL: transactional execution
+					session.getConnection().commit();
+				} catch (SQLException e1) {
+					// ignore
+				}
 				return false;
 			}
 		} catch (Exception e) {
@@ -368,7 +430,7 @@ public class DDLCreator {
 	public String getTableInConflict(DataSource dataSource, DBMS dbms) {
 		try {
 			if (dataSource != null) {
-				Session session = new Session(dataSource, dbms);
+				Session session = new Session(dataSource, dbms, executionContext.getIsolationLevel());
 				session.setSilent(true);
 				try {
 					final boolean[] uptodate = new boolean[] { false };

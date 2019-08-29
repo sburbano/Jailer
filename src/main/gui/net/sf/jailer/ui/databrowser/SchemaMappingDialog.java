@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -96,8 +96,8 @@ public class SchemaMappingDialog extends javax.swing.JDialog {
 				comboboxes.put(schema, comboBox);
 				
 				JLabel label = new JLabel();
-				label.setFont(new java.awt.Font("DejaVu Sans", 1, 13)); // NOI18N
-				label.setText(schema);
+				label.setFont(label.getFont().deriveFont(label.getFont().getSize()+2f));
+		        label.setText(schema);
 				gridBagConstraints = new java.awt.GridBagConstraints();
 				gridBagConstraints.gridx = 4;
 				gridBagConstraints.gridy = y;

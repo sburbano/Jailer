@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,8 +112,7 @@ public class XmlDocumentComparator {
 				return false;
 			}
 		}
-		// TODO: check attributes too
-		
+
 		boolean docContainsPart = true;
 		for (int i = 0; i < part.getChildNodes().getLength(); ++i) {
 			if (!(part.getChildNodes().item(i) instanceof Element)) continue; 

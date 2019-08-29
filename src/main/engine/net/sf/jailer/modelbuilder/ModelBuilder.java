@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.importfilter.ImportFilterManager;
 import net.sf.jailer.util.CsvFile;
 import net.sf.jailer.util.CsvFile.Line;
+import net.sf.jailer.util.PrintUtil;
 import net.sf.jailer.util.Quoting;
 import net.sf.jailer.util.SqlUtil;
 
@@ -154,11 +155,11 @@ public class ModelBuilder {
 		for (Line line: source.getLines()) {
 			String key = line.cells.get(keyColumn);
 			destLines.remove(key);
-			result.append(line.toString() + "\n");
+			result.append(line.toString() + PrintUtil.LINE_SEPARATOR);
 		}
 		
 		for (Line line: destLines.values()) {
-			result.append(line.toString() + "\n");
+			result.append(line.toString() + PrintUtil.LINE_SEPARATOR);
 		}
 		
 		writeFile(destFile, header + result.toString());
@@ -170,7 +171,7 @@ public class ModelBuilder {
 	 * @param warnings string-buffer to print warnings into, may be <code>null</code>
 	 */
 	public static void build(DataSource dataSource, DBMS dbms, String schema, StringBuffer warnings, ExecutionContext executionContext) throws Exception {
-		session = new Session(dataSource, dbms);
+		session = new Session(dataSource, dbms, executionContext.getIsolationLevel());
 		session.setIntrospectionSchema(schema);
 
 		resetFiles(executionContext);
@@ -210,7 +211,11 @@ public class ModelBuilder {
 		
 		StringBuilder columnsDefinition = new StringBuilder();
 		CsvFile excludeTablesCSV = getExcludeTablesCSV(executionContext);
+		Map<String, Table> allTablesSet = new TreeMap<String, Table>();
 		for (Table table: allTables) {
+			allTablesSet.put(table.getName(), table);
+		}
+		for (Table table: allTablesSet.values()) {
 			if (!isJailerTable(table, quoting) &&
 				!excludeTablesCSV.contains(new String[] { table.getName()}) && 
 				!excludeTablesCSV.contains(new String[] { table.getName().toUpperCase() })) {
@@ -223,7 +228,7 @@ public class ModelBuilder {
 						columnsDefinition.append(CsvFile.encodeCell(c.toSQL(null) + (c.isIdentityColumn? " identity" : "") + (c.isVirtual? " virtual" : "") + (c.isNullable? " null" : "")) + "; ");
 						knownIdentifiers.putColumnName(table.getName(), c.name);
 					}
-					columnsDefinition.append("\n");
+					columnsDefinition.append(PrintUtil.LINE_SEPARATOR);
 				}
 			}
 		}
@@ -249,14 +254,14 @@ public class ModelBuilder {
 							}
 						}
 						if (newPk.size() == old.primaryKey.getColumns().size()) {
-							table = new Table(old.getName(), new PrimaryKeyFactory().createPrimaryKey(newPk), false, false);
+							table = new Table(old.getName(), new PrimaryKeyFactory(executionContext).createPrimaryKey(newPk, old.getName()), false, false);
 							table.setAuthor(old.getAuthor());
 						}
 					}
 					
 					String warning = "Table '" + table.getName() + "' has no primary key";
 					if (table.primaryKey.getColumns().size() == 0) {
-						warnings.append(warning + "\n");
+						warnings.append(warning + PrintUtil.LINE_SEPARATOR);
 					} else {
 						warning += ", taking manually defined key.";
 					}
@@ -266,14 +271,14 @@ public class ModelBuilder {
 				for (Column pk: table.primaryKey.getColumns()) {
 					tableDefinitions += CsvFile.encodeCell(pk.toString()) + ";";
 				}
-				tableDefinitions += "   ;" + CsvFile.encodeCell(table.getAuthor()) + ";\n";
+				tableDefinitions += "   ;" + CsvFile.encodeCell(table.getAuthor()) + ";" + PrintUtil.LINE_SEPARATOR;
 			}
 		}
 		
 		resetTableFile(tableDefinitions, executionContext);
 
 		// re-read data model with new tables
-		dataModel = new DataModel(getModelBuilderTablesFilename(executionContext), getModelBuilderAssociationsFilename(executionContext), new HashMap<String, String>(), assocFilter, new PrimaryKeyFactory(), executionContext, false, knownIdentifiers);
+		dataModel = new DataModel(getModelBuilderTablesFilename(executionContext), getModelBuilderAssociationsFilename(executionContext), new HashMap<String, String>(), assocFilter, new PrimaryKeyFactory(executionContext), executionContext, false, knownIdentifiers);
 
 		Collection<Association> associations = new ArrayList<Association>();
 		Map<Association, String[]> namingSuggestion = new HashMap<Association, String[]>();
@@ -306,7 +311,6 @@ public class ModelBuilder {
 			}
 		}
 		
-		String associationDefinition = "";
 		Set<String> names = new HashSet<String>();
 		for (Table table: dataModel.getTables()) {
 			for (Association association: table.associations) {
@@ -315,6 +319,9 @@ public class ModelBuilder {
 				}
 			}
 		}
+		
+		Map<String, String> assocLines = new TreeMap<String, String>();
+		
 		for (Association association: associationsToWrite) {
 			String firstInsert = " ";
 			if (association.isInsertSourceBeforeDestination()) {
@@ -350,15 +357,19 @@ public class ModelBuilder {
 				}
 			}
 			names.add(name);
-			associationDefinition += CsvFile.encodeCell(association.source.getName()) + "; " + CsvFile.encodeCell(association.destination.getName()) + "; " + firstInsert + "; " + card + "; " + CsvFile.encodeCell(association.getJoinCondition()) + 
-									 "; " + CsvFile.encodeCell(name) + "; " + CsvFile.encodeCell(association.getAuthor()) + ";\n";
+			assocLines.put(name, CsvFile.encodeCell(association.source.getName()) + "; " + CsvFile.encodeCell(association.destination.getName()) + "; " + firstInsert + "; " + card + "; " + CsvFile.encodeCell(association.getJoinCondition()) + 
+									 "; " + CsvFile.encodeCell(name) + "; " + CsvFile.encodeCell(association.getAuthor()));
 		}
 		
-		resetAssociationFile(associationDefinition, executionContext);
+		StringBuilder associationDefinition = new StringBuilder();
+		for (String line: assocLines.values()) {
+			associationDefinition.append(line + PrintUtil.LINE_SEPARATOR);
+		}
+		
+		resetAssociationFile(associationDefinition.toString(), executionContext);
 	}
 
-	private static String ASSOC_HEADER = "# generated by Jailer\n\n" +
-			"# Table A; Table B;  first-insert; cardinality (opt); join-condition; name; author\n";
+	private static String ASSOC_HEADER = "# Table A; Table B; First-insert; Cardinality (opt); Join-condition; Name; Author" + PrintUtil.LINE_SEPARATOR;
 	
 	private static void resetAssociationFile(String associationDefinition, ExecutionContext executionContext) throws IOException {
 		writeFile(getModelBuilderAssociationsFilename(executionContext), 
@@ -366,8 +377,7 @@ public class ModelBuilder {
 				associationDefinition);
 	}
 
-	private static String TABLE_HEADER = "# generated by Jailer\n\n" +
-			"# Name; upsert; primary key; ; author\n";
+	private static String TABLE_HEADER = "# Name; Upsert; Primary Key; ; Author" + PrintUtil.LINE_SEPARATOR;
 	
 	private static void resetTableFile(String tableDefinitions, ExecutionContext executionContext) throws IOException {
 		writeFile(getModelBuilderTablesFilename(executionContext), 
@@ -375,8 +385,7 @@ public class ModelBuilder {
 				tableDefinitions);
 	}
 	
-	private static String COLUMN_HEADER = "# generated by Jailer\n\n" +
-			"# Table; columns\n";
+	private static String COLUMN_HEADER = "# Table; Columns" + PrintUtil.LINE_SEPARATOR;
 	
 	private static void resetColumnsFile(String columnsDefinitions, ExecutionContext executionContext) throws IOException {
 		writeFile(getModelBuilderColumnsFilename(executionContext), 

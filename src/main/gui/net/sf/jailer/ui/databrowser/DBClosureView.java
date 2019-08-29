@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,6 @@ import java.util.Vector;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
-import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -60,6 +59,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
 import javax.swing.JTable;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.border.BevelBorder;
 import javax.swing.table.DefaultTableModel;
@@ -70,11 +70,10 @@ import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.DataModel;
 import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.ui.AutoCompletion;
-import net.sf.jailer.ui.ClosureView;
 import net.sf.jailer.ui.JComboBox;
 import net.sf.jailer.ui.StringSearchPanel;
-import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.StringSearchPanel.AdditionalComponentFactory;
+import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.databrowser.Desktop.RowBrowser;
 import net.sf.jailer.ui.pathfinder.HistoryPanel;
 import net.sf.jailer.ui.pathfinder.PathFinder;
@@ -125,6 +124,9 @@ public abstract class DBClosureView extends javax.swing.JDialog {
 			    	Table r = path.get(i);
 			    	String tabName = getDataModel().getDisplayName(r);
 			        selectCell(result.expand && i == path.size() - 1, tabName, r);
+			        if (i == path.size() - 1) {
+			        	scrollTableCellToVisible(tabName);
+			        }
 			    }
 			}
 		}
@@ -289,7 +291,7 @@ public abstract class DBClosureView extends javax.swing.JDialog {
 //                            menu.add(excludeAll);
 		                menu.addSeparator();
 		                JPopupMenu popup = rb.browserContentPane.createPopupMenu(null, -1, 0, 0, false);
-		                JPopupMenu popup2 = rb.browserContentPane.createSqlPopupMenu(null, -1, 0, 0, true, closureTable);
+		                JPopupMenu popup2 = rb.browserContentPane.createSqlPopupMenu(-1, 0, 0, true, closureTable);
 		                popup.add(new JSeparator());
 		                for (Component c : popup.getComponents()) {
 		                    menu.add(c);
@@ -437,12 +439,13 @@ public abstract class DBClosureView extends javax.swing.JDialog {
         GridBagConstraints gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;
         gridBagConstraints.gridy = 20;
-        JButton searchButton = StringSearchPanel.createSearchButton(this.parent, searchComboBox, "Find Table", new Runnable() {
-            @Override
-            public void run() {
-                findButtonActionPerformed(null);
-            }
-        });
+		final javax.swing.JComboBox comboBox = searchComboBox;
+        JToggleButton searchButton = StringSearchPanel.createSearchButton(this.parent, comboBox, "Find Table", new Runnable() {
+		    @Override
+		    public void run() {
+		        findButtonActionPerformed(null);
+		    }
+		}, null, null, null, false, null, false);
         tablePanel.add(searchButton, gridBagConstraints);
         
         searchComboBox.setVisible(false);
@@ -467,7 +470,7 @@ public abstract class DBClosureView extends javax.swing.JDialog {
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 2;
         gridBagConstraints.gridy = 20;
-		JButton stFindPathButton = StringSearchPanel.createSearchButton(
+		JToggleButton stFindPathButton = StringSearchPanel.createSearchButton(
 				this.parent, findPathComboBox, 
 				new Object() {
 					public String toString() {
@@ -504,7 +507,7 @@ public abstract class DBClosureView extends javax.swing.JDialog {
 				};
 		        return historyPanel;
 			}
-		});
+		}, false);
 		tablePanel.add(stFindPathButton, gridBagConstraints);
         
         findPathComboBox.setVisible(false);
@@ -679,6 +682,10 @@ public abstract class DBClosureView extends javax.swing.JDialog {
         setLocation(100, 100);
         setSize(500, 500);
         setAlwaysOnTop(true);
+
+        jLabel7.setVisible(false);
+        jLabel8.setVisible(false);
+        jLabel9.setVisible(false);
     }
 
 	protected String toolTip(String tableName, CellInfo theCellInfo) {
@@ -1335,6 +1342,7 @@ public abstract class DBClosureView extends javax.swing.JDialog {
     private void findButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_findButtonActionPerformed
         Object toFind = searchComboBox.getSelectedItem();
         find((String) toFind);
+        scrollTableCellToVisible((String) toFind);
     }//GEN-LAST:event_findButtonActionPerformed
 
     private void findPathComboBoxActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_findPathComboBoxActionPerformed
@@ -1349,6 +1357,14 @@ public abstract class DBClosureView extends javax.swing.JDialog {
             if (cellInfo != null) {
                 selectTableCell(cellInfo.column, cellInfo.row);
             }
+        }
+    }
+
+    private void scrollTableCellToVisible(String toFind) {
+    	CellInfo cellInfo = this.cellInfo.get(toFind);
+        if (cellInfo != null) {
+	    	Rectangle cellRect = closureTable.getCellRect(cellInfo.row, cellInfo.column, true);
+			closureTable.scrollRectToVisible(new Rectangle(cellRect.x, Math.max(cellRect.y - cellRect.height, 0), cellRect.width, cellRect.height * 3));
         }
     }
 

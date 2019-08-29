@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ public class ResultSetRenderer extends javax.swing.JPanel {
         	titelLabel.setToolTipText(null);
         }
         
-		final BrowserContentPane rb = new ResultContentPane(datamodel, null, "", session, null, null,
+		final BrowserContentPane rb = new ResultContentPane(datamodel, null, "", session, null,
                 null, null, new RowsClosure(), Integer.MAX_VALUE, false, false,
                 resultSet.getMetaData().getColumnCount() > 1? 180 : 400,
                 executionContext);
@@ -81,6 +81,7 @@ public class ResultSetRenderer extends javax.swing.JPanel {
         loadJob.run();
         JComponent rTabContainer = rb.getRowsTableContainer();
         rb.sortColumnsCheckBox.setVisible(false);
+        rb.sortColumnsPanel.setVisible(false);
         renderPanel.add(rTabContainer);
         rb.resetRowsTableContainer();
         renderPanel.repaint();
@@ -134,11 +135,11 @@ public class ResultSetRenderer extends javax.swing.JPanel {
     // End of variables declaration//GEN-END:variables
     class ResultContentPane extends BrowserContentPane {
     	private final Integer limit;
-    	public ResultContentPane(DataModel dataModel, Table table, String condition, Session session, Row parentRow,
+    	public ResultContentPane(DataModel dataModel, Table table, String condition, Session session,
                 List<Row> parentRows, Association association, Frame parentFrame,
                 RowsClosure rowsClosure, Integer limit, Boolean selectDistinct,
                 boolean reload, int maxColumnWidth, ExecutionContext executionContext) {
-            super(dataModel, table, condition, session, parentRow, parentRows, association, parentFrame, 
+            super(dataModel, table, condition, session, parentRows, association, parentFrame, 
             		rowsClosure, selectDistinct, reload, executionContext);
             singleRowDetailsViewTitel = "Details";
             this.maxColumnWidth = maxColumnWidth;
@@ -179,7 +180,7 @@ public class ResultSetRenderer extends javax.swing.JPanel {
         protected void onContentChange(List<Row> rows, boolean reloadChildren) {
         }
         @Override
-        protected RowBrowser navigateTo(Association association, int rowIndex, Row row) {
+        protected RowBrowser navigateTo(Association association, List<Row> pRows) {
         	return null;
         }
         @Override

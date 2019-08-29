@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 
 import net.sf.jailer.configuration.DBMS;
 import net.sf.jailer.database.Session;
@@ -45,8 +44,9 @@ public class SessionForUI extends Session {
 	 * @param dataSource the data source
 	 * @param dbms the DBMS
 	 */
-	public static SessionForUI createSession(DataSource dataSource, DBMS dbms, final Window w) throws SQLException {
-		final SessionForUI session = new SessionForUI(dataSource, dbms);
+	public static SessionForUI createSession(DataSource dataSource, DBMS dbms, Integer isolationLevel, final Window w) throws SQLException {
+		Session.setThreadSharesConnection();
+		final SessionForUI session = new SessionForUI(dataSource, dbms, isolationLevel);
 		final AtomicReference<Connection> con = new AtomicReference<Connection>();
 		final AtomicReference<Throwable> exception = new AtomicReference<Throwable>();
 		session.connectionDialog = new JDialog(w, "Connecting");
@@ -54,6 +54,7 @@ public class SessionForUI extends Session {
 		Thread thread = new Thread(new Runnable() {
 			@Override
 			public void run() {
+				Session.setThreadSharesConnection();
 				try {
 					Connection newCon = session.connectionFactory.getConnection();
 					if (session.cancelled.get()) {
@@ -68,7 +69,7 @@ public class SessionForUI extends Session {
 				} catch (Throwable e) {
 					exception.set(e);
 				}
-				SwingUtilities.invokeLater(new Runnable() {
+				UIUtil.invokeLater(new Runnable() {
 					@Override
 					public void run() {
 						session.connectionDialog.setVisible(false);
@@ -116,8 +117,8 @@ public class SessionForUI extends Session {
 	/**
 	 * Constructor.
 	 */
-	private SessionForUI(DataSource dataSource, DBMS dbms) throws SQLException {
-		super(dataSource, dbms);
+	private SessionForUI(DataSource dataSource, DBMS dbms, Integer isolationLevel) throws SQLException {
+		super(dataSource, dbms, isolationLevel);
 		connectingPanel.setBackground(java.awt.Color.white);
 
         jLabel1.setForeground(java.awt.Color.red);
@@ -144,6 +145,7 @@ public class SessionForUI extends Session {
 	 */
 	@Override
 	public void shutDown() throws SQLException {
+		down.set(true);
 		Thread thread = new Thread(new Runnable() {
 			@Override
 			public void run() {

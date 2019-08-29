@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ import org.fife.ui.rtextarea.SearchContext;
 import org.fife.ui.rtextarea.SearchEngine;
 import org.fife.ui.rtextarea.SearchResult;
 
+import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.databrowser.metadata.MDTable;
 import net.sf.jailer.ui.databrowser.metadata.MetaDataPanel;
 import net.sf.jailer.util.Pair;
@@ -889,7 +890,7 @@ public class RSyntaxTextAreaWithSQLSyntaxStyle extends RSyntaxTextArea implement
 			loc = getCurrentStatementLocation(eosLines);
 		}
 		updateMenuItems(loc != null && !isTextEmpty(loc.a, loc.b));
-		runBlock.setEnabled(allowRun && loc != null && !isTextEmpty(loc.a, loc.b));
+		runBlock.setEnabled(!withExecuteActions || (allowRun && loc != null && !isTextEmpty(loc.a, loc.b)));
 		explain.setEnabled(canExplain() && allowRun && loc != null && !isTextEmpty(loc.a, loc.b));
 		runAll.setEnabled(allowRun && RSyntaxTextAreaWithSQLSyntaxStyle.this.getDocument().getLength() > 0);
 		if (allowRun && setLineHighlights) {
@@ -966,7 +967,7 @@ public class RSyntaxTextAreaWithSQLSyntaxStyle extends RSyntaxTextArea implement
 							}
 							pending.set(false);
 							if (!stopped.get()) {
-								SwingUtilities.invokeLater(new Runnable() {
+								UIUtil.invokeLater(new Runnable() {
 									@Override
 									public void run() {
 										updateMenuItemState(true, true);
@@ -1096,18 +1097,18 @@ public class RSyntaxTextAreaWithSQLSyntaxStyle extends RSyntaxTextArea implement
 			lastLineHeight = getLineHeight();
 			try {
 				String dir = "/net/sf/jailer/ui/resource";
-				icon = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsole.png")));
-	    	    iconBegin = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebegin.png")));
-				iconBeginEnd = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginend.png")));
-				iconEnd = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleend.png")));
-				iconf = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolef.png")));
-	    	    iconBeginf = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginf.png")));
-				iconBeginEndf = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginendf.png")));
-				iconEndf = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleendf.png")));
-				icon2 = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsole2.png")));
-	    	    iconBegin2 = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebegin2.png")));
-				iconBeginEnd2 = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginend2.png")));
-				iconEnd2 = scaleToLineHeight(new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleend2.png")));
+				icon = scaleToLineHeight(iconR);
+	    	    iconBegin = scaleToLineHeight(iconBeginR);
+				iconBeginEnd = scaleToLineHeight(iconBeginEndR);
+				iconEnd = scaleToLineHeight(iconEndR);
+				iconf = scaleToLineHeight(iconfR);
+	    	    iconBeginf = scaleToLineHeight(iconBeginfR);
+				iconBeginEndf = scaleToLineHeight(iconBeginEndfR);
+				iconEndf = scaleToLineHeight(iconEndfR);
+				icon2 = scaleToLineHeight(icon2R);
+	    	    iconBegin2 = scaleToLineHeight(iconBegin2R);
+				iconBeginEnd2 = scaleToLineHeight(iconBeginEnd2R);
+				iconEnd2 = scaleToLineHeight(iconEnd2R);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -1129,5 +1130,38 @@ public class RSyntaxTextAreaWithSQLSyntaxStyle extends RSyntaxTextArea implement
 	private ImageIcon iconBeginf;
 	private ImageIcon iconBeginEndf;
 	private ImageIcon iconEndf;
+
+	static {
+		try {
+			String dir = "/net/sf/jailer/ui/resource";
+			iconR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsole.png"));
+		    iconBeginR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebegin.png"));
+			iconBeginEndR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginend.png"));
+			iconEndR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleend.png"));
+			iconfR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolef.png"));
+		    iconBeginfR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginf.png"));
+			iconBeginEndfR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginendf.png"));
+			iconEndfR = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleendf.png"));
+			icon2R = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsole2.png"));
+		    iconBegin2R = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebegin2.png"));
+			iconBeginEnd2R = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsolebeginend2.png"));
+			iconEnd2R = new ImageIcon(MetaDataPanel.class.getResource(dir + "/sqlconsoleend2.png"));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private static ImageIcon iconR;
+	private static ImageIcon iconBeginR;
+	private static ImageIcon iconBeginEndR;
+	private static ImageIcon iconEndR;
+	private static ImageIcon icon2R;
+	private static ImageIcon iconBegin2R;
+	private static ImageIcon iconBeginEnd2R;
+	private static ImageIcon iconEnd2R;
+	private static ImageIcon iconfR;
+	private static ImageIcon iconBeginfR;
+	private static ImageIcon iconBeginEndfR;
+	private static ImageIcon iconEndfR;
 
 }

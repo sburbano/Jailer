@@ -19,9 +19,15 @@ Jailer is a tool for database subsetting and relational data browsing.
  - Data Browsing. Navigate bidirectionally through the database by following foreign-key-based or user-defined relationships.
  - SQL Console with code completion, syntax highlighting and database metadata visualization.
 
- 
+## Prerequisites
+
+ - Java JRE 7 (or above)
+   Important: due to HiDPI graphics support, Java JRE 11 (or above) is strongly recommended.
+ - JDBC-driver for your RDBMS
+
 ## News
 
+ - 2019-02-01   The new "Model Migration Tool" allows you to easily find and edit the newly added associations if the data model has been extended after the last change to this extraction model.
  - 2018-04-26   The new feature "Analyze SQL" analyzes SQL statements and proposes association definitions. This allows to reverse-engineer the data model based on existing SQL queries.
  - 2018-03-06   SQL Console with code completion, syntax highlighting and database metadata visualization.
  - 2017-05-10   New API provides programmatic access to the data export and import functionality. http://jailer.sourceforge.net/api.html
@@ -41,19 +47,18 @@ Jailer is a tool for database subsetting and relational data browsing.
 
 ## Installation
 
-Use the installer "Jailer-Install-<N>.exe" or unzip the file "jailer_<N>.zip".
+Use the installer "Jailer-Install-n.n.n.exe" or unzip the file "jailer_n.n.n.zip".
+See also <a href="http://jailer.sourceforge.net/faq.html#multiuser">http://jailer.sourceforge.net/faq.html#multiuser</a>
 
  - Database Subsetter
     - On windows platform execute "Jailer.exe". You can also start "jailerGUI.bat".
     - On Unix/Linux platform execute the script "jailerGUI.sh" or use "java -jar jailer.jar"
 
-
  - Data Browser
     - On windows platform execute "jailerDataBrowser.exe", or "jailerDataBrowser.bat"
     - On Unix/Linux platform execute the script "jailerDataBrowser.sh"
 
-
-
+## Contact
  - Home:    http://jailer.sourceforge.net/ or https://github.com/Wisser/Jailer
  - Forum:   https://sourceforge.net/p/jailer/discussion/
  - Support: rwisser@users.sourceforge.net

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ import net.sf.jailer.ui.databrowser.metadata.MetaDataDetailsPanel;
 import net.sf.jailer.ui.databrowser.metadata.MetaDataSource;
 import net.sf.jailer.util.Pair;
 import net.sf.jailer.util.Quoting;
+import net.sf.jailer.util.SqlUtil;
 import net.sf.jsqlparser.expression.AllComparisonExpression;
 import net.sf.jsqlparser.expression.AnalyticExpression;
 import net.sf.jsqlparser.expression.AnyComparisonExpression;
@@ -164,7 +165,7 @@ public class QueryTypeAnalyser {
 	public static List<Table> getType(String sqlSelect, final MetaDataSource metaDataSource) {
 		net.sf.jsqlparser.statement.Statement st;
 		try {
-			st = CCJSqlParserUtil.parse(sqlSelect);
+			st = CCJSqlParserUtil.parse(SqlUtil.removeNonMeaningfulFragments(sqlSelect));
 			Map<Pair<String, String>, Collection<Pair<String, String>>> equivs = new HashMap<Pair<String,String>, Collection<Pair<String,String>>>();
 			final LinkedHashMap<String, MDTable> fromClause = analyseFromClause(st, equivs, metaDataSource);
 			final List<Pair<String	, String>> selectClause = new ArrayList<Pair<String, String>>();
@@ -364,14 +365,22 @@ public class QueryTypeAnalyser {
 									if (tableName.getPivot() != null) {
 										unknownTable();
 									} else {
-										MDSchema mdSchema;
-										if (schema == null) {
-											mdSchema = metaDataSource.getDefaultSchema();
-										} else {
-											mdSchema = metaDataSource.find(schema);
+										MDSchema mdSchema = null;
+										if (metaDataSource.isInitialized()) {
+											if (schema == null) {
+												mdSchema = metaDataSource.getDefaultSchema();
+											} else {
+												mdSchema = metaDataSource.find(schema);
+											}
 										}
 										if (mdSchema != null) {
-											MDTable mdTable = mdSchema.find(name);
+											MDTable mdTable;
+											if (!mdSchema.isLoaded()) {
+												mdSchema.loadTables(true, null, null);
+												mdTable = null;
+									    	} else {
+									    		mdTable = mdSchema.find(name);
+									    	}
 											if (mdTable != null) {
 												result.put(tableName.getAlias() != null? tableName.getAlias().getName() : mdTable.getName(), mdTable);
 											} else {
@@ -445,7 +454,7 @@ public class QueryTypeAnalyser {
 		for (String pk: theTable.getPrimaryKeyColumns()) {
 			pkColumns.add(new net.sf.jailer.datamodel.Column(pk, "", 0, -1));
 		}
-		PrimaryKey primaryKey = new PrimaryKeyFactory().createPrimaryKey(pkColumns);
+		PrimaryKey primaryKey = new PrimaryKeyFactory(null).createPrimaryKey(pkColumns, null);
 		Table toTable = theTable.getMetaDataSource().toTable(theTable);
 		Table table;
 		if (toTable != null) {

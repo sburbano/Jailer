@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -376,7 +376,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 		if (depth > MAX_DEPTH) {
 			return new HashSet<Table>();
 		}
-		PrimaryKeyFactory primaryKeyFactory = new PrimaryKeyFactory();
+		PrimaryKeyFactory primaryKeyFactory = new PrimaryKeyFactory(executionContext);
 		
 		Set<Table> tables = new HashSet<Table>();
 		DatabaseMetaData metaData = session.getMetaData();
@@ -412,7 +412,12 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 		Map<String, Map<Integer, Column>> pkColumns = new HashMap<String, Map<Integer, Column>>();
 		for (String tableName: tableNames) {
 			Table tmp = new Table(tableName, null, false, false);
-			resultSet = getPrimaryKeys(session, metaData, quoting.unquote(tmp.getOriginalSchema(quoting.quote(introspectionSchema))), quoting.unquote(tmp.getUnqualifiedName()), true);
+			resultSet = null;
+			try {
+				resultSet = getPrimaryKeys(session, metaData, quoting.unquote(tmp.getOriginalSchema(quoting.quote(introspectionSchema))), quoting.unquote(tmp.getUnqualifiedName()), true);
+			} catch (Exception e) {
+				_log.warn("can't get PK for " + tableName, e);
+			}
 			Map<Integer, Column> pk = pkColumns.get(tableName);
 			if (pk == null) {
 				pk = new HashMap<Integer, Column>();
@@ -420,7 +425,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 			}
 			boolean hasPK = false;
 			int nextKeySeq = 0;
-			while (resultSet.next()) {
+			while (resultSet != null && resultSet.next()) {
 				hasPK = true;
 				int keySeq = resultSet.getInt(5);
 				if (DBMS.SQLITE.equals(session.dbms)) {
@@ -434,7 +439,9 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 				hasPK = findUniqueIndexBasedKey(metaData, quoting, session, tmp, pk, tableTypes.get(tableName));
 			}
 			_log.info((hasPK? "" : "no ") + "primary key found for table " + tableName);
-			resultSet.close();
+			if (resultSet != null) {
+				resultSet.close();
+			}
 			CancellationHandler.checkForCancellation(null);
 		}
 		for (String tableName: tableNames) {
@@ -493,7 +500,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 					columns.add(column);
 				}
 			}
-			PrimaryKey primaryKey = primaryKeyFactory.createPrimaryKey(columns);
+			PrimaryKey primaryKey = primaryKeyFactory.createPrimaryKey(columns, tableName);
 			Table table = new Table(tableName, primaryKey, false, false);
 			table.setAuthor(metaData.getDriverName());
 			tables.add(table);
@@ -565,6 +572,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 										newPK.add(newC);
 									} else {
 										newPK = null;
+										break;
 									}
 								} else {
 									newPK = null;
@@ -591,7 +599,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 			final boolean[] isValid = new boolean[] { true };
 			final boolean[] selectExists = new boolean[] { false };
 			final UnderlyingTableInfo underlyingTableInfo = new UnderlyingTableInfo();
-			st = CCJSqlParserUtil.parse(viewText);
+			st = CCJSqlParserUtil.parse(SqlUtil.removeNonMeaningfulFragments(viewText));
 			st.accept(new StatementVisitor() {
 				@Override
 				public void visit(Upsert arg0) {
@@ -846,7 +854,6 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 			ResultSet resultSet = getColumns(session, metaData, quoting.unquote(tmp.getOriginalSchema(quoting.quote(session.getIntrospectionSchema()))), quoting.unquote(tmp.getUnqualifiedName()), "%", true, false, tableType);
 			
 			List<String> nonNullColumns = new ArrayList<String>();
-			boolean hasNullable = false;
 			while (resultSet.next()) {
 				int type = resultSet.getInt(5);
 				if (resultSet.getInt(11) == DatabaseMetaData.columnNoNulls) {
@@ -869,10 +876,7 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 							type == Types.TINYINT ||
 							type == Types.VARCHAR
 						)) {
-						hasNullable = true;
 					}
-				} else {
-					hasNullable = true;
 				}
 			}
 			resultSet.close();
@@ -914,16 +918,6 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 					return true;
 				}
 			}
-			
-//			if (!hasNullable && "TABLE".equalsIgnoreCase(tableType)) {
-//				if (nonNullColumns.size() <= 6) {
-//					for (int i = 1; i <= nonNullColumns.size(); ++i) {
-//						pk.put(i, new Column(quoting.quote(nonNullColumns.get(i - 1)), "", 0, -1));
-//					}
-//					return true;
-//				}
-//			}
-//			
 			return false;
 		} catch (Exception e) {
 			_log.error(e.getMessage(), e);
@@ -954,9 +948,9 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 	 */
 	public static ResultSet getIndexes(Session session, DatabaseMetaData metaData, String schemaPattern, String tableNamePattern) throws SQLException {
 		if (DBMS.MySQL.equals(session.dbms)) {
-			return metaData.getIndexInfo(schemaPattern, null, tableNamePattern, false, false);
+			return metaData.getIndexInfo(schemaPattern, null, tableNamePattern, false, true);
 		}
-		return metaData.getIndexInfo(null, schemaPattern, tableNamePattern, false, false);
+		return metaData.getIndexInfo(null, schemaPattern, tableNamePattern, false, true);
 	}
 
 	/**
@@ -1134,10 +1128,13 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 	 * @param userName schema with this name may be empty
 	 */ 
 	public static String getDefaultSchema(Session session, String userName) {
-		if (DBMS.MySQL.equals(session.dbms)) {
+		
+		// TODO: in MSSQL, should default schema be userName if SCHEMA_NAME() is "dbo"?
+		
+		if (session.dbms.getDefaultSchemaQuery() != null) {
 			try {
 				final String[] database = new String[1];
-				session.executeQuery("Select DATABASE()", new Session.AbstractResultSetReader() {
+				session.executeQuery(session.dbms.getDefaultSchemaQuery(), new Session.AbstractResultSetReader() {
 					@Override
 					public void readCurrentRow(ResultSet resultSet) throws SQLException {
 						database[0] = resultSet.getString(1);
@@ -1154,9 +1151,8 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 		List<String> schemas = new ArrayList<String>();
 		try {
 			DatabaseMetaData metaData = session.getMetaData();
-			String dbName = metaData.getDatabaseProductName();
-			boolean isPostgreSQL = dbName != null && dbName.toLowerCase().contains("PostgreSQL".toLowerCase());
-			boolean isH2Sql = dbName != null && dbName.toLowerCase().startsWith("H2".toLowerCase());
+			boolean isPostgreSQL = DBMS.POSTGRESQL.equals(session.dbms);
+			boolean isH2Sql = DBMS.H2.equals(session.dbms);
 			ResultSet rs = DBMS.MySQL.equals(session.dbms)? metaData.getCatalogs() : metaData.getSchemas();
 			while (rs.next()) {
 				schemas.add(rs.getString(DBMS.MySQL.equals(session.dbms)? "TABLE_CAT" : "TABLE_SCHEM"));
@@ -1489,3 +1485,4 @@ public class JDBCMetaDataBasedModelElementFinder implements ModelElementFinder {
 	}
 	
 }
+

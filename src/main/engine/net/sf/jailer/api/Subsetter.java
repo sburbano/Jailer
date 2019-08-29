@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Map;
 
@@ -30,6 +31,8 @@ import net.sf.jailer.ExecutionContext;
 import net.sf.jailer.configuration.DBMS;
 import net.sf.jailer.database.BasicDataSource;
 import net.sf.jailer.database.WorkingTableScope;
+import net.sf.jailer.subsetting.ExportStatistic;
+import net.sf.jailer.subsetting.InconsistentSubsettingResultException;
 import net.sf.jailer.subsetting.ScriptFormat;
 import net.sf.jailer.subsetting.SubsettingEngine;
 
@@ -113,11 +116,14 @@ public class Subsetter {
 	/**
 	 * Generates the export-script.
 	 * @param whereClause if not <code>null</code>, overrides the extraction model's subject condition 
-	 * 
 	 * @param exportScriptFile the export-script file (compressed if it ends with '.zip' or '.gz')
+	 * 
+	 * @return export statistic
+	 * 
+	 * @throws InconsistentSubsettingResultException if {@link ExecutionContext#isAbortInCaseOfInconsistency()} and the number of exported rows differs from that of the collected ones
 	 */
-	public void execute(String whereClause, File exportScriptFile) throws SQLException, IOException {
-		execute(whereClause, exportScriptFile, null);
+	public ExportStatistic execute(String whereClause, File exportScriptFile) throws SQLException, IOException {
+		return execute(whereClause, exportScriptFile, null);
 	}
 
 	/**
@@ -126,8 +132,12 @@ public class Subsetter {
 	 * @param whereClause if not <code>null</code>, overrides the extraction model's subject condition 
 	 * @param exportScriptFile the export-script file (compressed if it ends with '.zip' or '.gz'), optional
 	 * @param deleteScriptFile the delete-script file (compressed if it ends with '.zip' or '.gz'), optional
+	 * 
+	 * @return export statistic
+	 * 
+	 * @throws InconsistentSubsettingResultException if {@link ExecutionContext#isAbortInCaseOfInconsistency()} and the number of exported rows differs from that of the collected ones
 	 */
-	public void execute(String whereClause, File exportScriptFile, File deleteScriptFile) throws SQLException, IOException {
+	public ExportStatistic execute(String whereClause, File exportScriptFile, File deleteScriptFile) throws SQLException, IOException {
 		try {
 			if (getDataModelURL() == null) {
 				throw new IllegalStateException("missing DataModelURL");
@@ -149,7 +159,7 @@ public class Subsetter {
 					throw new IllegalStateException("no DBMS set but data-source is not net.sf.jailer.database.BasicDataSource");
 				}
 			}
-			new SubsettingEngine(executionContext).export(
+			return new SubsettingEngine(executionContext).export(
 					whereClause,
 					getExtractionModelURL(), 
 					exportScriptFile == null? null : exportScriptFile.getAbsolutePath(),
@@ -395,6 +405,43 @@ public class Subsetter {
 	}
 
 	/**
+	 * If <code>true</code>, export rows in a single transaction. (default is false)
+	 *
+	 * @return <code>true</code> if Import rows in a single transaction
+	 */
+	public boolean getTransactional() {
+		return executionContext.getTransactional();
+	}
+
+	/**
+	 * If <code>true</code>, export rows in a single transaction. (default is false)
+	 *
+	 * @param transactional
+	 *            <code>true</code> if import rows in a single transaction
+	 */
+	public void setTransactional(boolean transactional) {
+		executionContext.setTransactional(transactional);
+	}
+
+	/**
+	 * Gets IsolationLevel.
+	 * 
+	 * @see Connection#setTransactionIsolation(int)
+	 */
+	public Integer getIsolationLevel() {
+		return executionContext.getIsolationLevel();
+	}
+
+	/**
+	 * Sets IsolationLevel.
+	 * 
+	 * @see Connection#setTransactionIsolation(int)
+	 */
+	public void setIsolationLevel(Integer isolationLevel) {
+		executionContext.setIsolationLevel(isolationLevel);
+	}
+
+	/**
 	 * Gets maximum number of entities per insert-statement (in export-file,
 	 * default is 10)
 	 *
@@ -602,6 +649,22 @@ public class Subsetter {
 	}
 
 	/**
+	 * If <code>true</code>, the Subsetter throws an 
+	 * 
+	 * @return if <code>true</code>, abort the process if the result is inconsistent due to insufficient transaction isolation
+	 */
+	public boolean isAbortInCaseOfInconsistency() {
+		return executionContext.isAbortInCaseOfInconsistency();
+	}
+
+	/**
+	 * @param abortInCaseOfInconsitency if <code>true</code>, abort the process if the result is inconsistent due to insufficient transaction isolation
+	 */
+	public void setAbortInCaseOfInconsistency(boolean abortInCaseOfInconsitency) {
+		executionContext.setAbortInCaseOfInconsistency(abortInCaseOfInconsitency);
+	}
+
+	/**
 	 * @return the size of extraction-model pool (default is 10)
 	 */
 	public int getModelPoolSize() {
@@ -613,6 +676,16 @@ public class Subsetter {
 	 */
 	public void setModelPoolSize(int modelPoolSize) {
 		this.modelPoolSize = modelPoolSize;
+	}
+
+	/**
+	 * Gets the {@link ExecutionContext}. <br>
+	 * Use this to set parameters that are not accessible via this facade.
+	 * 
+	 * @return the {@link ExecutionContext}
+	 */
+	public ExecutionContext getExecutionContext() {
+		return executionContext;
 	}
 
 	private final ExecutionContext executionContext;

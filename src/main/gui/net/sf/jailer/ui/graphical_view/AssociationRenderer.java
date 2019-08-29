@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.Cardinality;
 import prefuse.Constants;
 import prefuse.render.EdgeRenderer;
+import prefuse.util.ColorLib;
 import prefuse.util.GraphicsLib;
 import prefuse.visual.EdgeItem;
 import prefuse.visual.VisualItem;
@@ -81,6 +82,7 @@ public class AssociationRenderer extends EdgeRenderer {
 	 */
 	private Point2D m_isctPoints2[] = new Point2D[2];
 	private Point2D starPosition = null;
+	private Point2D pendingPosition = null;
 	
 	/**
 	 * Return a non-transformed shape for the visual representation of the
@@ -188,7 +190,7 @@ public class AssociationRenderer extends EdgeRenderer {
 		
 		if (!forward && (Cardinality.MANY_TO_MANY.equals(association.getCardinality()) || Cardinality.MANY_TO_ONE.equals(association.getCardinality()))
 		||   forward && (Cardinality.MANY_TO_MANY.equals(association.getCardinality()) || Cardinality.ONE_TO_MANY.equals(association.getCardinality()))) {
-			starPosition = m_tmpPoints[forward? 1:0];
+			starPosition = new Point2D.Double(m_tmpPoints[forward? 1:0].getX(), m_tmpPoints[forward? 1:0].getY());
 			start = starPosition;
 			end = m_tmpPoints[forward? 0:1];
 			AffineTransform t = new AffineTransform();
@@ -199,6 +201,22 @@ public class AssociationRenderer extends EdgeRenderer {
 			t.transform(p, shift);
 			starPosition.setLocation(starPosition.getX() + shift.getX(), starPosition.getY() + shift.getY());
 			starBounds = new Rectangle2D.Double(starPosition.getX() - STAR_SIZE * (starWidth / 2), starPosition.getY() - STAR_SIZE * (starHeight / 2), starWidth * STAR_SIZE, starHeight * STAR_SIZE);
+		}
+
+		pendingBounds = null;
+		pendingPosition = null;
+		
+		if (!forward && association.getDataModel().decisionPending.contains(association.getName())
+		||   forward && association.getDataModel().decisionPending.contains(association.reversalAssociation.getName())) {
+			pendingPosition = new Point2D.Double(m_tmpPoints[forward? 1:0].getX(), m_tmpPoints[forward? 1:0].getY());
+			start = pendingPosition;
+			end = m_tmpPoints[forward? 0:1];
+			Point2D p = new Point2D.Double(), shift = new Point2D.Double();
+			double d = 1.11;
+			p.setLocation((end.getX() - start.getX()) / d, (end.getY() - start.getY()) / d);
+			shift = p;
+			pendingPosition.setLocation(pendingPosition.getX() + shift.getX(), pendingPosition.getY() + shift.getY());
+			pendingBounds = new Rectangle2D.Double(pendingPosition.getX() - PENDING_SIZE * (pendingWidth / 2), pendingPosition.getY() - PENDING_SIZE * (pendingHeight / 2), pendingWidth * PENDING_SIZE, pendingHeight * PENDING_SIZE);
 		}
 
 		return shape;
@@ -245,8 +263,7 @@ public class AssociationRenderer extends EdgeRenderer {
 			}
 			color = reversed? associationColor(association.reversalAssociation) : associationColor(association);
 		}
-		item.setFillColor(color);
-		item.setStrokeColor(color);
+		boolean restricted = false;
 		BasicStroke stroke = item.getStroke();
 		if (stroke != null) {
 			if (reversed) {
@@ -257,10 +274,31 @@ public class AssociationRenderer extends EdgeRenderer {
 			if (association != null && association.isRestricted() && !association.isIgnored()) {
 				item.setStroke(new BasicStroke(stroke.getLineWidth(), stroke.getEndCap(), stroke.getLineJoin(), stroke.getMiterLimit(), 
 					new float[] { 8f, 6f }, 1.0f));
+				restricted = true;
 			} else {
 				item.setStroke(new BasicStroke(stroke.getLineWidth(), stroke.getEndCap(), stroke.getLineJoin(), stroke.getMiterLimit()));
 			}
 		}
+		if (isSelected) {
+			item.setStrokeColor(ColorLib.rgb(0, 0, 0));
+			stroke = item.getStroke();
+			if (stroke != null) {
+				BasicStroke itemStroke;
+				long animationstep = System.currentTimeMillis();
+				if (restricted) {
+					int length = 20 * 100;
+					itemStroke = new BasicStroke(stroke.getLineWidth(), BasicStroke.CAP_ROUND, stroke.getLineJoin(), stroke.getMiterLimit(), new float[] { 7f, 6f, 1f, 6f },
+							(reversed? animationstep % length : length - animationstep % length) / 100.0f);
+				} else {
+					int length = 12 * 100;
+					itemStroke = new BasicStroke(stroke.getLineWidth(), BasicStroke.CAP_ROUND, stroke.getLineJoin(), stroke.getMiterLimit(), new float[] { 7f, 5f },
+						(reversed? animationstep % length : length - animationstep % length) / 100.0f);
+				}
+				item.setStroke(itemStroke);
+			}
+		}
+		item.setFillColor(color);
+		item.setStrokeColor(color);
 		if ("XML".equals(association.getDataModel().getExportModus())) {
 			m_arrowHead = updateArrowHead(m_arrowWidth, m_arrowHeight, association, isSelected);
 			arrowIsPotAggregation = true;
@@ -271,12 +309,19 @@ public class AssociationRenderer extends EdgeRenderer {
 			arrowIsPotAggregation = false;
 		}
 		starPosition = null;
+		pendingPosition = null;
 		render(g, item);
 		if (starPosition != null && starImage != null) {
 			double size = STAR_SIZE;
 			transform.setTransform(size, 0, 0, size, starPosition.getX() - size * (starWidth / 2), starPosition.getY() - size * (starHeight / 2));
 			g.drawImage(starImage, transform, null);
 			starPosition = null;
+		}
+		if (pendingPosition != null && pendingImage != null) {
+			double size = PENDING_SIZE;
+			transform.setTransform(size, 0, 0, size, pendingPosition.getX() - size * (pendingWidth / 2), pendingPosition.getY() - size * (pendingHeight / 2));
+			g.drawImage(pendingImage, transform, null);
+			pendingPosition = null;
 		}
 	}
 
@@ -292,11 +337,18 @@ public class AssociationRenderer extends EdgeRenderer {
 				Rectangle2D.union(bbox, starBounds, bbox);
 			}
 		}
+		if (pendingBounds != null ) {
+			Rectangle2D bbox = (Rectangle2D)item.get(VisualItem.BOUNDS);
+			if (bbox != null) {
+				Rectangle2D.union(bbox, pendingBounds, bbox);
+			}
+		}
 	}
 
 	private boolean arrowIsPotAggregation = false;
 	private AffineTransform transform = new AffineTransform();
 	private Rectangle2D starBounds = null;
+	private Rectangle2D pendingBounds = null;
 	
 	/**
 	 * Gets color for association.
@@ -381,6 +433,10 @@ public class AssociationRenderer extends EdgeRenderer {
 	private double starWidth = 0;
 	private double starHeight = 0;
 	private final double STAR_SIZE = 0.22;
+	private Image pendingImage = null;
+	private double pendingWidth = 0;
+	private double pendingHeight = 0;
+	private final double PENDING_SIZE = 0.32;
 	{
 		// load images
 		try {
@@ -389,6 +445,9 @@ public class AssociationRenderer extends EdgeRenderer {
 			starImage = new ImageIcon(getClass().getResource(dir + "/star.png")).getImage();
 			starWidth = starImage.getWidth(null);
 			starHeight = starImage.getHeight(null);
+			pendingImage = new ImageIcon(getClass().getResource(dir + "/wanr.png")).getImage();
+			pendingWidth = pendingImage.getWidth(null);
+			pendingHeight = pendingImage.getHeight(null);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}

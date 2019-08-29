@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -527,8 +527,9 @@ public class RemoteEntityGraph extends EntityGraph {
 				pkEqualsEntityID(table, "T", "E") +
 				" Where E.birthday=0 and E.r_entitygraph=" + graphID + " and E.type=" + typeName(table) + "" +
 				orderBy,
-				reader);
+				reader, withExplicitCommit());
 		executionContext.getProgressListenerRegistry().fireExported(table, rc);
+		addExportedCount(rc);
 	}
 	
 	/**
@@ -565,8 +566,9 @@ public class RemoteEntityGraph extends EntityGraph {
 		long rc = session.executeQuery(
 				sqlQuery + (orderByPK? orderBy : ""),
 				reader,
-				(!orderByPK? sqlQuery : null), null, 0);
+				(!orderByPK? sqlQuery : null), null, 0, withExplicitCommit());
 		executionContext.getProgressListenerRegistry().fireExported(table, rc);
+		addExportedCount(rc);
 	}
 	
 	/**
@@ -604,6 +606,7 @@ public class RemoteEntityGraph extends EntityGraph {
 		Session.ResultSetReader reader = getTransformerFactory().create(table);
 		long rc = readEntities(table, orderByPK, reader);
 		executionContext.getProgressListenerRegistry().fireExported(table, rc);
+		addExportedCount(rc);
 	}
 
 	/**
@@ -631,7 +634,7 @@ public class RemoteEntityGraph extends EntityGraph {
 		String sqlQuery = "Select " + columnList + " From " + dmlTableReference(ENTITY, session) + " E join " + quoting.requote(table.getName()) + " T on " +
 				pkEqualsEntityID(table, "T", "E") +
 				" Where E.birthday>=0 and E.r_entitygraph=" + graphID + " and E.type=" + typeName(table) + "";
-		return session.executeQuery(sqlQuery, reader);
+		return session.executeQuery(sqlQuery, reader, withExplicitCommit());
 	}
 
 	/**
@@ -648,11 +651,15 @@ public class RemoteEntityGraph extends EntityGraph {
 		if (orderByPK) {
 			String sqlQueryWithOrderBy = sqlQuery +
 				(orderByPK? " order by " + rowIdSupport.getPrimaryKey(table).columnList("T.", quoting) : "");
-			rc = session.executeQuery(sqlQueryWithOrderBy, reader, sqlQuery, null, 0);
+			rc = session.executeQuery(sqlQueryWithOrderBy, reader, sqlQuery, null, 0, withExplicitCommit());
 		} else {
-			rc = session.executeQuery(sqlQuery, reader);
+			rc = session.executeQuery(sqlQuery, reader, withExplicitCommit());
 		}
 		return rc;
+	}
+
+	private boolean withExplicitCommit() {
+		return DBMS.POSTGRESQL.equals(session.dbms);
 	}
 
 	/**
@@ -919,8 +926,9 @@ public class RemoteEntityGraph extends EntityGraph {
 				 " and D.from_type=" + typeName(association.source) + " and assoc=" + association.getId() +
 				 " and D.r_entitygraph=" + graphID;
 		}
-		long rc = session.executeQuery(select, reader);
+		long rc = session.executeQuery(select, reader, withExplicitCommit());
 		executionContext.getProgressListenerRegistry().fireExported(table, rc);
+		addExportedCount(rc);
 	}
 	
 	/**
@@ -960,7 +968,7 @@ public class RemoteEntityGraph extends EntityGraph {
 			 " Where (traversed is null or traversed <> 1)" +
 			 " and D.from_type=" + typeName(table) + "" +
 			 " and D.r_entitygraph=" + graphID;
-		session.executeQuery(select, reader);
+		session.executeQuery(select, reader, withExplicitCommit());
 	}
 	
 	/**

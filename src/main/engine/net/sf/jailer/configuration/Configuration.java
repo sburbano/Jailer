@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,7 +82,15 @@ public class Configuration {
 		}
 		return new File(file);
 	}
-	
+
+	public boolean isTempFile(File file) {
+		try {
+			return new File(getTempFileFolder()).equals(file.getParentFile()) && file.getName().startsWith("up-");
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
 	/**
 	 * The temporary files folder. Defaults to 'tmp'.
 	 */
@@ -92,12 +100,39 @@ public class Configuration {
 	 * The renderer.
 	 */
 	private HtmlDataModelRenderer renderer;
-	
+
+	/**
+	 * URL rewrite rule.
+	 */
+	public static class UrlRewriteRule {
+		private String pattern;
+		private String replacement;
+
+		public String getPattern() {
+			return pattern;
+		}
+		public void setPattern(String pattern) {
+			this.pattern = pattern;
+		}
+		
+		public String getReplacement() {
+			return replacement;
+		}
+		public void setReplacement(String replacement) {
+			this.replacement = replacement;
+		}
+	}
+
+	/**
+	 * All URL rewrite rules.
+	 */
+	private List<UrlRewriteRule> urlRewriteRules = new ArrayList<UrlRewriteRule>();
+
 	/**
 	 * All {@link DBMS}s.
 	 */
 	private List<DBMS> dBMSConfigurations = new ArrayList<DBMS>();
-
+	
 	/**
 	 * If <code>true</code>, the UPK don't preserve order. This minimizes the size of the UPK.
 	 */
@@ -110,6 +145,11 @@ public class Configuration {
 	 * Replacement for null in DBUnit datasets.
 	 */
 	private String nullColumnPlaceholder = null;
+
+	/**
+	 * Generate upsert statements without nulls?
+	 */
+	private boolean generateUpsertStatementsWithoutNulls = true;
 
 	private int columnsPerIFMTable = 8;
 
@@ -211,6 +251,21 @@ public class Configuration {
 	}
 
 	/**
+	 * @return the URL rewrite rules.
+	 */
+	@XmlElement(name = "urlRewriteRule")
+	public List<UrlRewriteRule> getUrlRewriteRules() {
+		return urlRewriteRules;
+	}
+
+	/**
+	 * @param urlRewriteRules the URL rewrite rules.
+	 */
+	public void setUrlRewriteRules(List<UrlRewriteRule> urlRewriteRules) {
+		this.urlRewriteRules = urlRewriteRules;
+	}
+
+	/**
 	 * @return the dBMSConfigurations
 	 */
 	@XmlElement(name = "dbms")
@@ -246,7 +301,22 @@ public class Configuration {
 		this.columnsPerIFMTable = columnsPerIFMTable;
 	}
 
+	/**
+	 * @return generate upsert statements without nulls?
+	 */
+	public boolean isGenerateUpsertStatementsWithoutNulls() {
+		return generateUpsertStatementsWithoutNulls;
+	}
+
+	/**
+	 * @param generateUpsertStatementsWithoutNulls generate upsert statements without nulls?
+	 */
+	public void setGenerateUpsertStatementsWithoutNulls(boolean generateUpsertStatementsWithoutNulls) {
+		this.generateUpsertStatementsWithoutNulls = generateUpsertStatementsWithoutNulls;
+	}
+
 	static {
 		DBMS.values(); // trigger static init
 	}
+
 }

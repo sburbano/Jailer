@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,8 @@ import net.sf.jailer.util.SqlUtil;
 public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends DefaultCompletionProvider {
 
     protected SOURCE metaDataSource;
-    private Quoting quoting;
+    private final Session session;
+    private Quoting llQuoting;
     private Map<String, TABLE> userDefinedAliases = new HashMap<String, TABLE>();
     private Map<String, TABLE> aliases = new LinkedHashMap<String, TABLE>();
     private Map<String, TABLE> aliasesTopLevel = new LinkedHashMap<String, TABLE>();
@@ -71,7 +72,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
      */
     public SQLCompletionProvider(Session session, SOURCE metaDataSource) throws SQLException {
         this.metaDataSource = metaDataSource;
-        this.quoting = session == null? null : new Quoting(session);
+        this.session = session;
     }
 
     /**
@@ -101,7 +102,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
      */
     public void reset(Session session, SOURCE metaDataSource) throws SQLException {
         this.metaDataSource = metaDataSource;
-        this.quoting = session == null? null : new Quoting(session);
+        this.llQuoting = session == null? null : new Quoting(session);
     }
     
     /**
@@ -155,6 +156,17 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
     private long timeOut;
     private JComponent waitCursorSubject;
     private final int COLUMN_LOADING_TIMEOUT = 7000;
+
+    private Quoting getQuoting() {
+    	if (llQuoting == null) {
+    		try {
+				llQuoting = session == null? null : new Quoting(session);
+			} catch (SQLException e) {
+				// ignore
+			}
+    	}
+    	return llQuoting;
+    }
     
     @Override
     protected List<Completion> getCompletionsImpl(JTextComponent comp) {
@@ -368,9 +380,9 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
                                     if (dest != null) {
                                         String qualifiedName = "";
                                         if (!schemaName.isEmpty()) {
-                                            qualifiedName = (quoting == null? getSchemaName(schema) : quoting.quote(getSchemaName(schema))) + ".";
+                                            qualifiedName = (getQuoting() == null? getSchemaName(schema) : getQuoting().quote(getSchemaName(schema))) + ".";
                                         }
-                                        qualifiedName += (quoting == null? getTableName(dest) : quoting.quote(getTableName(dest)));
+                                        qualifiedName += (getQuoting() == null? getTableName(dest) : getQuoting().quote(getTableName(dest)));
                                         destSet.add(qualifiedName);
                                         String cond = a.getUnrestrictedJoinCondition();
                                         if (a.reversed) {
@@ -459,7 +471,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
                         if (result != null) {
                             for (SCHEMA s: getSchemas(metaDataSource)) {
                                 if (!s.equals(schema)) {
-                                    result.add(new SQLCompletion(SQLCompletionProvider.this, Quoting.staticUnquote(getSchemaName(s)), quoting == null? getSchemaName(s) : quoting.quote(getSchemaName(s)), 
+                                    result.add(new SQLCompletion(SQLCompletionProvider.this, Quoting.staticUnquote(getSchemaName(s)), getQuoting() == null? getSchemaName(s) : getQuoting().quote(getSchemaName(s)), 
                                         null, SQLCompletion.COLOR_SCHEMA));
                                 }
                             }
@@ -527,9 +539,18 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
                                 tables.add(table);
                             }
                         } else {
+                        	Stack<Pair<String, TABLE>> stack = new Stack<Pair<String, TABLE>>();
                             for (Entry<String, TABLE> entry: aliasesTopLevel.entrySet()) {
-                                tables.add(entry.getValue());
-                                tableNames.add(entry.getKey());
+                                stack.push(new Pair<String, TABLE>(entry.getKey(), entry.getValue()));
+                            }
+                            Set<String> seen = new HashSet<String>();
+                            while (!stack.isEmpty()) {
+                            	Pair<String, TABLE> entry = stack.pop();
+                            	if (!seen.contains(Quoting.normalizeIdentifier(entry.a))) {
+	                            	tables.add(entry.b);
+	                                tableNames.add(entry.a);
+	                                seen.add(Quoting.normalizeIdentifier(entry.a));
+                            	}
                             }
                         }
                         boolean timedOut = false;
@@ -678,7 +699,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
                             sb.append(alias + ".");
                         }
                     } else {
-                        if (tableNames.size() > 1) {
+                        if (tableNames.size() > 1 || tableNames.size() == 1 && !tableNames.get(0).equals(getTableName(table))) {
                             sb.append(tableNames.get(i) + ".");
                         }
                     }
@@ -705,7 +726,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
         List<SQLCompletion> newCompletions = new ArrayList<SQLCompletion>();
         if (context != null) {
             for (String column: getAndWaitForColumns(context)) {
-                newCompletions.add(new SQLCompletion(this, Quoting.staticUnquote(column), quoting == null? column : quoting.quote(column), 
+                newCompletions.add(new SQLCompletion(this, Quoting.staticUnquote(column), getQuoting() == null? column : getQuoting().quote(column), 
                         getTableName(context), SQLCompletion.COLOR_COLUMN));
             }
         }
@@ -726,7 +747,7 @@ public abstract class SQLCompletionProvider<SOURCE, SCHEMA, TABLE> extends Defau
             for (TABLE table: getTables(schema)) {
                 String tableName = getTableName(table);
                 if (!ModelBuilder.isJailerTable(tableName)) {
-                    newCompletions.add(new SQLCompletion(this, Quoting.staticUnquote(tableName), quoting == null? tableName : quoting.quote(tableName),
+                    newCompletions.add(new SQLCompletion(this, Quoting.staticUnquote(tableName), getQuoting() == null? tableName : getQuoting().quote(tableName),
                             getSchemaName(schema), SQLCompletion.COLOR_TABLE));
                 }
             }

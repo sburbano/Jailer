@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 package net.sf.jailer.ui.progress;
 
 import java.awt.Color;
+import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,6 +29,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import javax.swing.JButton;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
@@ -44,7 +48,7 @@ import net.sf.jailer.util.CancellationException;
  * 
  * @author Ralf Wisser
  */
-public class SingleStageProgressListener implements ProgressListener {
+public abstract class SingleStageProgressListener implements ProgressListener {
 
 	/**
 	 * Table showing collected rows.
@@ -65,6 +69,7 @@ public class SingleStageProgressListener implements ProgressListener {
 	 * Today.
 	 */
 	private int today = -1, lastUpdated = -1;
+	
 	private boolean lastRowIsUptodate = false;
 	private boolean readjustColumnWidth = false;
 	
@@ -92,6 +97,7 @@ public class SingleStageProgressListener implements ProgressListener {
 	private long timeDelay = 0;
 	private final Set<String> targetSchemaSet;
 	private final boolean forExportStage;
+	private final boolean checkPK;
 
 	/**
 	 * Constructor.
@@ -100,13 +106,14 @@ public class SingleStageProgressListener implements ProgressListener {
 	 *            table showing collected rows
 	 * @param targetSchemaSet 
 	 */
-	public SingleStageProgressListener(final ProgressTable progressTable, final ProgressPanel progressPanel, DataModel dataModel, final boolean confirm, Set<String> targetSchemaSet, boolean forExportStage) {
+	public SingleStageProgressListener(final ProgressTable progressTable, final ProgressPanel progressPanel, DataModel dataModel, final boolean confirm, Set<String> targetSchemaSet, boolean forExportStage, boolean checkPK) {
 		this.progressTable = progressTable;
 		this.dataModel = dataModel;
 		this.confirm = confirm;
 		this.targetSchemaSet = targetSchemaSet;
 		this.forExportStage = forExportStage;
 		this.stopClock = !forExportStage;
+		this.checkPK = checkPK;
 		Thread thread = new Thread(new Runnable() {
 
 			@Override
@@ -141,7 +148,7 @@ public class SingleStageProgressListener implements ProgressListener {
 			private void updateRowTable(final ProgressTable progressTable,
 					final ProgressPanel progressPanel, final long startTime,
 					final long[] nextUpdateTS, final boolean fUpdate) {
-				SwingUtilities.invokeLater(new Runnable() {
+				UIUtil.invokeLater(new Runnable() {
 					@Override
 					public void run() {
 						if (fUpdate) {
@@ -164,7 +171,7 @@ public class SingleStageProgressListener implements ProgressListener {
 								if (!progressPanel.inCancellingStep || isErrorStage) {
 									progressPanel.stepLabel.setText(currentStep);
 									if (isErrorStage) {
-										progressPanel.stepLabel.setForeground(Color.RED);
+										progressPanel.setStepLabelForeground(Color.RED);
 									}
 								}
 								long t = System.currentTimeMillis();
@@ -401,14 +408,15 @@ public class SingleStageProgressListener implements ProgressListener {
 	 *            the stage
 	 */
 	@Override
-	public synchronized void newStage(String stage, boolean isErrorStage, boolean isFinalStage) {
+	public synchronized void newStage(String stage, final boolean isErrorStage, final boolean isFinalStage) {
 		this.currentStep = stage;
 		this.isErrorStage = isErrorStage;
 		this.stopClock = isFinalStage;
 		this.lastRowIsUptodate = false;
 		this.cleanupLastLine = true;
 		if (isFinalStage || isErrorStage) {
-			SwingUtilities.invokeLater(new Runnable() {
+			final long finalCollectedRows = collectedRows;
+			UIUtil.invokeLater(new Runnable() {
 				@Override
 				public void run() {
 					synchronized (SingleStageProgressListener.class) {
@@ -416,10 +424,38 @@ public class SingleStageProgressListener implements ProgressListener {
 						readjustColumnWidth = true;
 					}
 					addOrUpdateRows();
+					if (checkPK && forExportStage && isFinalStage && !isErrorStage) {
+						if (!warned && exportedRows.get() != finalCollectedRows) {
+							warned = true;
+							String message =
+									"Warning: The number of rows collected (" + finalCollectedRows + ") differs from that of the exported ones (" + exportedRows.get() + ").\n \n" +
+									"This may have been caused by an invalid primary key definition.\nPlease note that each primary key must be unique and never null.\n \n" +
+									"It is recommended to check the integrity of the primary keys.\n" +
+									"To do this, use the button below \nor select the option \"Check primary key\" in the export dialog.";
+							final JButton button = new JButton("Check Primary Keys");
+							button.addActionListener(new ActionListener() {
+								@Override
+								public void actionPerformed(ActionEvent e) {
+									Window window = SwingUtilities.getWindowAncestor(button);
+									if (window != null) {
+										window.setVisible(false);
+										window.dispose();
+									}
+									validatePrimaryKeys();
+								}
+							});
+							
+							UIUtil.showException(progressTable, "Warning", new RuntimeException(message), UIUtil.EXCEPTION_CONTEXT_USER_WARNING, button);
+						}
+					}
 				}
 			});
 		}
 	}
+
+	protected abstract void validatePrimaryKeys();
+	
+	private boolean warned = false;
 
 	private boolean confirmInsert() {
 		StringBuilder sb = new StringBuilder();

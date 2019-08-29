@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JRadioButton;
 import javax.swing.JTextField;
 
 /**
@@ -104,7 +106,18 @@ public class Settings  {
 				if (entry.getValue() instanceof JTextField) {
 					setting.put(entry.getKey(), ((JTextField) entry.getValue()).getText());
 				} else if (entry.getValue() instanceof JCheckBox) {
-					setting.put(entry.getKey(), Boolean.valueOf(((JCheckBox) entry.getValue()).isSelected()).toString());
+					if (((JCheckBox) entry.getValue()).isEnabled()) {
+						setting.put(entry.getKey(), Boolean.valueOf(((JCheckBox) entry.getValue()).isSelected()).toString());
+					}
+				} else if (entry.getValue() instanceof JRadioButton) {
+					if (((JRadioButton) entry.getValue()).isEnabled()) {
+						setting.put(entry.getKey(), Boolean.valueOf(((JRadioButton) entry.getValue()).isSelected()).toString());
+					}
+				} else if (entry.getValue() instanceof JComboBox) {
+					Object sItem = ((JComboBox) entry.getValue()).getSelectedItem();
+					if (sItem != null) {
+						setting.put(entry.getKey(), sItem.toString());
+					}
 				}
 			}
 			settings.put(name.trim(), setting);
@@ -141,10 +154,18 @@ public class Settings  {
 			}
 			if (setting != null) {
 				for (Map.Entry<String, JComponent> entry: fields.entrySet()) {
-					if (entry.getValue() instanceof JTextField) {
+					if (entry.getValue() instanceof JTextField && setting.containsKey(entry.getKey())) {
 						((JTextField) entry.getValue()).setText(setting.get(entry.getKey()));
 					} else if (entry.getValue() instanceof JCheckBox && setting.containsKey(entry.getKey())) {
-						((JCheckBox) entry.getValue()).setSelected(Boolean.valueOf(setting.get(entry.getKey())));
+						if (((JCheckBox) entry.getValue()).isEnabled()) {
+							((JCheckBox) entry.getValue()).setSelected(Boolean.valueOf(setting.get(entry.getKey())));
+						}
+					} else if (entry.getValue() instanceof JRadioButton && setting.containsKey(entry.getKey())) {
+						if (((JRadioButton) entry.getValue()).isEnabled()) {
+							((JRadioButton) entry.getValue()).setSelected(Boolean.valueOf(setting.get(entry.getKey())));
+						}
+					} else if (entry.getValue() instanceof JComboBox && setting.containsKey(entry.getKey())) {
+						((JComboBox) entry.getValue()).setSelectedItem(setting.get(entry.getKey()));
 					}
 				}
 			}

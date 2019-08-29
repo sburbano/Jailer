@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FileDialog;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -44,7 +45,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
@@ -53,14 +53,17 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
-import java.net.URLConnection;
 import java.net.URLEncoder;
+import java.nio.file.Files;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -85,20 +88,28 @@ import org.apache.log4j.Logger;
 import net.sf.jailer.ExecutionContext;
 import net.sf.jailer.Jailer;
 import net.sf.jailer.JailerVersion;
+import net.sf.jailer.configuration.DBMS;
+import net.sf.jailer.database.BasicDataSource;
+import net.sf.jailer.database.PrimaryKeyValidator;
 import net.sf.jailer.database.Session;
 import net.sf.jailer.database.SqlException;
 import net.sf.jailer.datamodel.DataModel;
+import net.sf.jailer.datamodel.Table;
+import net.sf.jailer.ddl.DDLCreator;
+import net.sf.jailer.extractionmodel.ExtractionModel.IncompatibleModelException;
 import net.sf.jailer.progress.ProgressListener;
 import net.sf.jailer.ui.databrowser.BrowserContentPane.TableModelItem;
 import net.sf.jailer.ui.databrowser.Row;
 import net.sf.jailer.ui.scrollmenu.JScrollC2PopupMenu;
 import net.sf.jailer.ui.scrollmenu.JScrollPopupMenu;
 import net.sf.jailer.ui.syntaxtextarea.RSyntaxTextAreaWithSQLSyntaxStyle;
+import net.sf.jailer.ui.util.ConcurrentTaskControl;
 import net.sf.jailer.ui.util.HttpUtil;
 import net.sf.jailer.ui.util.UISettings;
 import net.sf.jailer.util.CancellationException;
 import net.sf.jailer.util.CancellationHandler;
 import net.sf.jailer.util.CycleFinder;
+import net.sf.jailer.util.JobManager;
 
 /**
  * Some utility methods.
@@ -139,12 +150,6 @@ public class UIUtil {
      */
     public static String choseFile(File selectedFile, String startDir, final String description, final String extension,
             Component parent, boolean addExtension, boolean forLoad, final boolean allowZip) {
-        final String extensionAlias;
-        if (".jm".equalsIgnoreCase(extension)) {
-            extensionAlias = ".csv";
-        } else {
-            extensionAlias = null;
-        }
         String newStartDir = restoreCurrentDir(extension);
         if (newStartDir != null) {
             startDir = newStartDir;
@@ -161,7 +166,10 @@ public class UIUtil {
             }
         }
 
-        parent = SwingUtilities.getWindowAncestor(parent);
+        Window ancestor = SwingUtilities.getWindowAncestor(parent);
+        if (ancestor != null) {
+        	parent = ancestor;
+        }
         FileDialog fileChooser;
         if (parent instanceof Dialog) {
             fileChooser = new FileDialog((Dialog) parent);
@@ -188,7 +196,7 @@ public class UIUtil {
                     }
                 }
                 if (set) {
-                    fileChooser.setFile("*" + extension + (extensionAlias != null? ";*" + extensionAlias : "") + (allowZip ? ";*" + ".zip;*" + ".gz" : ""));
+                    fileChooser.setFile("*" + extension + (allowZip ? ";*" + ".zip;*" + ".gz" : ""));
                 }
             }
         }
@@ -196,7 +204,6 @@ public class UIUtil {
             @Override
             public boolean accept(File dir, String name) {
                 return name.toLowerCase().endsWith(extension)
-                        || (extensionAlias != null && name.toLowerCase().endsWith(extensionAlias))
                         || allowZip && name.toLowerCase().endsWith(extension + ".gz")
                         || allowZip && name.toLowerCase().endsWith(extension + ".zip");
             }
@@ -221,7 +228,6 @@ public class UIUtil {
                     fn = f.getCanonicalPath();
                 }
                 if (addExtension && !(fn.endsWith(extension)
-                        || (extensionAlias != null && fn.endsWith(extensionAlias))
                         || (allowZip && (fn.endsWith(extension + ".zip") || fn.endsWith(extension + ".gz"))))) {
                     fn += extension;
                 }
@@ -235,7 +241,6 @@ public class UIUtil {
                 try {
                     fn = selFile.getCanonicalPath();
                     if (addExtension && !(fn.endsWith(extension)
-                            || (extensionAlias != null && fn.endsWith(extensionAlias))
                             || (allowZip && (fn.endsWith(extension + ".zip") || fn.endsWith(extension + ".gz"))))) {
                         fn += extension;
                     }
@@ -373,10 +378,22 @@ public class UIUtil {
         JDialog dialog = new JDialog(ownerOfConsole);
         List<String> args = new ArrayList<String>(cliArgs);
         final StringBuffer arglist = createCLIArgumentString(user, password, args, executionContext);
-        final String[] argsarray = new String[args.size()];
-        int i = 0;
+        final List<String> argslist = new ArrayList<String>();
+        boolean esc = true;
         for (String arg : args) {
-            argsarray[i++] = arg.trim();
+        	if (esc && arg.startsWith("-")) {
+        		if (arg.equals(user) || arg.equals(password)) {
+        			argslist.add("-");
+        		} else {
+        			esc = false;
+        		}
+        	}
+            argslist.add(arg);
+        }
+        final String[] argsarray = new String[argslist.size()];
+        int i = 0;
+        for (String arg : argslist) {
+        	argsarray[i++] = arg;
         }
         final JailerConsole outputView = new JailerConsole(ownerOfConsole, dialog, showLogfileButton,
                 showExplainLogButton, progressPanel, fullSize);
@@ -411,7 +428,7 @@ public class UIUtil {
                         synchronized (buffer) {
                             ready[0] = false;
                         }
-                        SwingUtilities.invokeLater(new Runnable() {
+                        UIUtil.invokeLater(new Runnable() {
                             @Override
 							public void run() {
                                 synchronized (buffer) {
@@ -462,21 +479,17 @@ public class UIUtil {
                     	cancelled = true;
                     }
                     if (cancelled && f) {
+                        cancel();
                         JOptionPane.showMessageDialog(outputView.dialog, "Cancellation in progress...", "Cancellation",
                                 JOptionPane.INFORMATION_MESSAGE);
                     } else if (exp[0] == null && !fin[0] && !cancelled) {
                         if (JOptionPane.showConfirmDialog(outputView.dialog, "Cancel operation?", "Cancellation",
                                 JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
                             if (!outputView.hasFinished) {
-                                new Thread(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        CancellationHandler.cancel(null);
-                                    }
-                                }).start();
+                                cancel();
                                 outputView.dialog.setTitle("Jailer Console - cancelling...");
                                 if (progressListener != null) {
-                                    progressListener.newStage("cancelling", true, true);
+                                    progressListener.newStage("cancelling...", true, true);
                                 }
                                 outputView.getCancelButton().setEnabled(false);
                                 cancelled = true;
@@ -484,6 +497,16 @@ public class UIUtil {
                         }
                     }
                 }
+				private void cancel() {
+					Thread thread = new Thread(new Runnable() {
+					    @Override
+					    public void run() {
+					        CancellationHandler.cancel(null);
+					    }
+					});
+					thread.setDaemon(true);
+					thread.start();
+				}
             });
             new Thread(new Runnable() {
                 @Override
@@ -511,7 +534,7 @@ public class UIUtil {
                             _log.info("arguments: " + arglist.toString().trim());
                         }
                         result[0] = Jailer.jailerMain(argsarray, disableWarnings ? new StringBuffer() : warnings,
-                                progressListener);
+                                progressListener, false);
                     } catch (Throwable t) {
                         synchronized (UIUtil.class) {
                             exp[0] = t;
@@ -523,7 +546,7 @@ public class UIUtil {
                             fin[0] = true;
                         }
                     }
-                    SwingUtilities.invokeLater(new Runnable() {
+                    UIUtil.invokeLater(new Runnable() {
                         @Override
 						public void run() {
                             synchronized (UIUtil.class) {
@@ -599,14 +622,14 @@ public class UIUtil {
     public static StringBuffer createCLIArgumentString(String user, String password, List<String> args, ExecutionContext executionContext) {
         args.add("-datamodel");
         args.add(executionContext.getQualifiedDatamodelFolder());
-        return createPlainCLIArguments(user, password, args);
+        return createPlainCLIArguments(user, password, args, true);
     }
 
-    public static StringBuffer createPlainCLIArguments(String user, String password, List<String> args) {
+    public static StringBuffer createPlainCLIArguments(String user, String password, List<String> args, boolean escMinus) {
         final StringBuffer arglist = new StringBuffer();
         int pwi = -1;
         for (int i = args.size() - 1; i >= 0; --i) {
-            if (args.get(i) != null && args.get(i).equals(password) && password.length() > 0) {
+            if (args.get(i) != null && password != null && args.get(i).equals(password) && password.length() > 0) {
                 pwi = i;
                 break;
             }
@@ -614,8 +637,11 @@ public class UIUtil {
         for (int i = 0; i < args.size(); ++i) {
             String arg = args.get(i);
             if (i == pwi) {
-                arglist.append(" \"<password>\"");
+                arglist.append((escMinus? " -" : "") + " \"<password>\"");
             } else {
+                if (escMinus && arg.startsWith("-") && user != null && arg.equals(user)) {
+                	arglist.append(" -");
+                }
                 if ("".equals(arg) || arg.contains(" ") || arg.contains("<") || arg.contains(">") || arg.contains("*")
                         || arg.contains("?") || arg.contains("|") || arg.contains("$") || arg.contains("\"")
                         || arg.contains("'") || arg.contains("\\") || arg.contains(";") || arg.contains("&")) {
@@ -637,7 +663,8 @@ public class UIUtil {
     }
 
     public static Object EXCEPTION_CONTEXT_USER_ERROR = new Object();
-
+    public static Object EXCEPTION_CONTEXT_USER_WARNING = new Object();
+    
     /**
      * Shows an exception.
      * 
@@ -665,21 +692,60 @@ public class UIUtil {
      *            the exception
      */
     public static void showException(Component parent, String title, Throwable t, Object context) {
-        if (t instanceof DataModel.NoPrimaryKeyException || t instanceof CycleFinder.CycleFoundException) {
+    	showException(parent, title, t, context, null);
+    }
+
+    /**
+     * Shows an exception.
+     * 
+     * @param parent
+     *            parent component of option pane
+     * @param title
+     *            title of option pane
+     * @param context
+     *            optional context object. String or Session is supported.
+     * @param t
+     *            the exception
+     */
+    public static void showException(Component parent, String title, Throwable t, Object context, JComponent additionalControl) {
+        if (context == EXCEPTION_CONTEXT_USER_ERROR) {
+        	if (t instanceof IndexOutOfBoundsException
+        			|| t instanceof NullPointerException
+        			|| t instanceof ClassCastException
+        			|| t instanceof IllegalStateException
+        			|| t instanceof IllegalArgumentException) {
+        		context = null;
+        	}
+        }
+    	if (t instanceof DataModel.NoPrimaryKeyException || t instanceof CycleFinder.CycleFoundException || t instanceof IncompatibleModelException) {
             context = EXCEPTION_CONTEXT_USER_ERROR;
         }
-        t.printStackTrace();
+    	if (!(t instanceof CancellationException)) {
+            t.printStackTrace();
+    	}
         if (!(t instanceof ClassNotFoundException)) {
             while (t.getCause() != null && t != t.getCause() && !(t instanceof SqlException)) {
                 t = t.getCause();
             }
         }
+    	if (t instanceof DataModel.NoPrimaryKeyException || t instanceof CycleFinder.CycleFoundException || t instanceof IncompatibleModelException) {
+            context = EXCEPTION_CONTEXT_USER_ERROR;
+        }
         if (t instanceof SqlException) {
             String message = ((SqlException) t).message;
             String sql = ((SqlException) t).sqlStatement;
-			new SqlErrorDialog(parent == null ? null : SwingUtilities.getWindowAncestor(parent),
-					((SqlException) t).isFormatted()? message : lineWrap(message, 120).toString(), sql, ((SqlException) t).isFormatted(), true, null);
+			if (message != null) {
+				if (sql != null) {
+		            String iMsg = message.toString() + "\n" + JailerVersion.VERSION + "\n" + sql;
+					sendIssue("internalSQL", iMsg);
+				}
+			}
+			new SqlErrorDialog(parent == null ? null : parent instanceof Window? (Window) parent : SwingUtilities.getWindowAncestor(parent),
+					((SqlException) t).isFormatted()? message : lineWrap(message, 120).toString(), sql, ((SqlException) t).isFormatted(), true, null, false, additionalControl);
             return;
+        }
+        if (t instanceof CancellationException) {
+        	return;
         }
         String message = t.getMessage();
         if (message == null || "".equals(message.trim())) {
@@ -700,15 +766,22 @@ public class UIUtil {
         PrintWriter pw = new PrintWriter(sw);
         t.printStackTrace(pw);
         if (context != EXCEPTION_CONTEXT_USER_ERROR) {
-            contextDesc += "\nHelp Desk: https://sourceforge.net/forum/?group_id=197260";
+            contextDesc += "\nHelp Desk: https://sourceforge.net/p/jailer/discussion/";
             contextDesc += "\nMail: rwisser@users.sourceforge.net\n";
             contextDesc += "\n" + JailerVersion.APPLICATION_NAME + " " + JailerVersion.VERSION + "\n\n" + sw.toString();
             
-            sendIssue("internal", msg.toString() + "\n" + contextDesc);
+            String iMsg = msg.toString() + "\n" + JailerVersion.APPLICATION_NAME + " " + JailerVersion.VERSION + "\n\n" + sw.toString();
+            iMsg = iMsg
+            		.replaceAll("\\bat [^\\n]*/", "at ")
+            		.replaceAll("\\bat java.", "atj..")
+					.replaceAll("\\bat javax.swing.", "atjs..")
+					.replaceAll("\\bat net.sf.jailer.", "atn..")
+					.replaceAll("\\s*(\\n)\\s*", "$1");
+            sendIssue("internal", iMsg);
         }
 
-        new SqlErrorDialog(parent == null ? null : SwingUtilities.getWindowAncestor(parent), msg.toString(),
-                contextDesc, false, false, context == EXCEPTION_CONTEXT_USER_ERROR ? title : null);
+        new SqlErrorDialog(parent == null ? null : parent instanceof Window? (Window) parent : SwingUtilities.getWindowAncestor(parent), msg.toString(),
+                contextDesc, false, false, context == EXCEPTION_CONTEXT_USER_ERROR || context == EXCEPTION_CONTEXT_USER_WARNING? title : null, context == EXCEPTION_CONTEXT_USER_WARNING, additionalControl);
     }
 
     private static StringBuilder lineWrap(String message, int maxwidth) {
@@ -735,7 +808,7 @@ public class UIUtil {
      */
     public static void initPeer() {
         try {
-            Thread.sleep(200);
+            Thread.sleep(100);
         } catch (InterruptedException e) {
         }
     }
@@ -744,7 +817,7 @@ public class UIUtil {
         try {
             // Get the size of the screen
             Dimension dim = Toolkit.getDefaultToolkit().getScreenSize();
-            int hd = d.getY() + d.getHeight() - (dim.height - 80);
+            int hd = d.getY() + d.getHeight() - (dim.height - 60);
             if (hd > 0) {
                 d.setSize(d.getWidth(), Math.max(d.getHeight() - hd, 150));
             }
@@ -850,12 +923,26 @@ public class UIUtil {
         System.exit(0);
     }
 
-    private static void sendIssue(final String type, final String issue) {
+    public static void sendIssue(final String type, final String issue) {
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
 		    	try {
-					HttpUtil.get("http://jailer.sf.net/issueReport.php?type=" + URLEncoder.encode(type, "UTF-8") + "&" + "issue=" + URLEncoder.encode(issue, "UTF-8"));
+					final int MAX_CL = 1300;
+					int maxEIssueLength = 4 * MAX_CL;
+					String url;
+					do {
+						String eIssue = URLEncoder.encode(issue, "UTF-8");
+			            if (eIssue.length() > maxEIssueLength) {
+			            	eIssue = eIssue.substring(0, maxEIssueLength);
+			            }
+						url = "http://jailer.sf.net/issueReport.php?type=" + URLEncoder.encode(type, "UTF-8") + "&" + "issue=" + eIssue
+							+ "&uuid=" + URLEncoder.encode(String.valueOf(UISettings.restore("uuid")), "UTF-8")
+							+ "&ts=" + URLEncoder.encode(new Date().toString(), "UTF-8")
+							+ "&jversion=" + URLEncoder.encode(System.getProperty("java.version") + "/" + System.getProperty("java.vm.vendor") + "/" + System.getProperty("java.vm.name") + "/" + System.getProperty("os.name"), "UTF-8") + "/(" + Environment.state + ")";
+						maxEIssueLength -= 10;
+					} while (url.length() > MAX_CL && maxEIssueLength > 100);
+					HttpUtil.get(url);
 				} catch (UnsupportedEncodingException e) {
 					// ignore
 				}
@@ -864,7 +951,11 @@ public class UIUtil {
     }
 
     public static String toHTML(String plainText, int maxLineLength) {
-        plainText = plainText.trim();
+    	return "<html>" + toHTMLFragment(plainText, maxLineLength);
+    }
+
+    public static String toHTMLFragment(String plainText, int maxLineLength) {
+    	        plainText = plainText.trim();
         if (maxLineLength > 0) {
             StringBuilder sb = new StringBuilder();
             int MAXLINES = 50;
@@ -883,8 +974,7 @@ public class UIUtil {
             }
             plainText = sb.toString();
         }
-        return "<html>" + 
-                plainText
+        return plainText
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
@@ -892,11 +982,15 @@ public class UIUtil {
                 .replace(" ", "&nbsp;")
                 .replace("\t","&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;");
     }
-    
+
     public static ImageIcon scaleIcon(JComponent component, ImageIcon icon) {
+    	return scaleIcon(component, icon, 1);
+    }
+
+    public static ImageIcon scaleIcon(JComponent component, ImageIcon icon, double scaleFactor) {
         if (icon != null) {
         	int heigth = component.getFontMetrics(new JLabel("M").getFont()).getHeight();
-        	double s = heigth / (double) icon.getIconHeight();
+        	double s = heigth * scaleFactor / (double) icon.getIconHeight();
         	try {
         		return new ImageIcon(icon.getImage().getScaledInstance((int)(icon.getIconWidth() * s), (int)(icon.getIconHeight() * s), Image.SCALE_SMOOTH));
         	} catch (Exception e) {
@@ -1017,7 +1111,7 @@ public class UIUtil {
     			}
     		}
 		});
-    	SwingUtilities.invokeLater(new Runnable() {
+    	UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 				setPopupActive(true);
@@ -1026,12 +1120,17 @@ public class UIUtil {
 		});
 	}
 
+    public static void invokeLater(final Runnable runnable) {
+    	SwingUtilities.invokeLater(runnable);
+    }
+
     public static void invokeLater(final int ticks, final Runnable runnable) {
 		SwingUtilities.invokeLater(new Runnable() {
 			int count = ticks;
 			@Override
 			public void run() {
-				if (--count <= 0) {
+				--count;
+				if (count <= 0) {
 					runnable.run();
 				} else {
 					SwingUtilities.invokeLater(this);			
@@ -1076,6 +1175,55 @@ public class UIUtil {
 	}
 
 	/**
+	 * Calls the {@link PrimaryKeyValidator}.
+	 * @param i 
+	 */
+	@SuppressWarnings("serial")
+	public static void validatePrimaryKeys(final Window windowAncestor, final BasicDataSource basicDataSource, final Set<Table> tables) {
+		final ConcurrentTaskControl concurrentTaskControl = new ConcurrentTaskControl(null, 
+				"<html>"
+				+ "Checking the primary key definitions in the data model <br>for uniqueness...</html>".replace(" ", "&nbsp;")) {
+				@Override
+				protected void onError(Throwable error) {
+					UIUtil.showException(windowAncestor, "Error", error);
+					closeWindow();
+				}
+				@Override
+				protected void onCancellation() {
+					closeWindow();
+					CancellationHandler.cancel(null);
+				}
+			};
+		ConcurrentTaskControl.openInModalDialog(windowAncestor, concurrentTaskControl, 
+			new ConcurrentTaskControl.Task() {
+				@Override
+				public void run() throws Throwable {
+					Session session = new Session(basicDataSource, basicDataSource.dbms, null);
+					JobManager jobManager = new JobManager(tables.size() > 1? 4 : 1);
+					try {
+						new PrimaryKeyValidator().validatePrimaryKey(session, tables, false, jobManager);
+					} finally {
+						session.shutDown();
+						jobManager.shutdown();
+					}
+					invokeLater(new Runnable() {
+						@Override
+						public void run() {
+							JOptionPane.showMessageDialog(windowAncestor, tables.size() == 1? "The primary key definition is valid." : "All primary key definitions are valid.");
+							concurrentTaskControl.closeWindow();
+						}
+					});
+				}
+		}, "Checking Primary Keys...");
+		invokeLater(4, new Runnable() {
+			@Override
+			public void run() {
+				CancellationHandler.reset(null);
+			}
+		});
+	}
+
+	/**
 	 * Initializes the "Native L&F" menu items.
 	 * 
 	 * @param nativeLAFCheckBoxMenuItem the menu item
@@ -1094,6 +1242,58 @@ public class UIUtil {
 
 	public static String format(long number) {
 		return NumberFormat.getInstance().format(number);
+	}
+
+	public static String correctFileSeparator(String fileName) {
+		if (fileName == null) {
+			return null;
+		}
+		if (File.separatorChar == '/') {
+			return fileName.replace('\\', File.separatorChar);
+		} else {
+			return fileName;
+		}
+	}
+
+	private static Font defaultFont = null;
+
+	public static Font defaultTitleFont() {
+		if (defaultFont == null) {
+			defaultFont = new JLabel().getFont();
+			defaultFont = defaultFont.deriveFont(defaultFont.getStyle() | Font.BOLD);
+		}
+		return defaultFont;
+	}
+
+	public static String getDDLTableInConflict(final DDLCreator ddlCreator, Window window, final BasicDataSource dataSource, final DBMS dbms) throws Exception {
+		return ConcurrentTaskControl.call(window, new Callable<String>() {
+			@Override
+			public String call() throws Exception {
+				return ddlCreator.getTableInConflict(dataSource, dbms);
+			}
+		}, "validate working tables...");
+	}
+
+	public static boolean isDDLUptodate(final DDLCreator ddlCreator, Window window, final BasicDataSource dataSource,
+			final DBMS dbms, final boolean useRowId, final String workingTableSchema) throws Exception {
+		return ConcurrentTaskControl.call(window, new Callable<Boolean>() {
+			@Override
+			public Boolean call() throws Exception {
+				return ddlCreator.isUptodate(dataSource, dbms, useRowId, workingTableSchema);
+			}
+		}, "validate working tables...");
+	}
+
+	public static BasicDataSource createBasicDataSource(Window window, final String driverClassName, final String dbUrl, final String dbUser, final String dbPassword, final int maxPoolSize, final URL... jdbcDriverURL) throws Exception {
+		if (!BasicDataSource.findDBMSNeedsConnection(dbUrl)) {
+			return new BasicDataSource(driverClassName, dbUrl, dbUser, dbPassword, maxPoolSize, jdbcDriverURL);
+		}
+		return ConcurrentTaskControl.call(window, new Callable<BasicDataSource>() {
+			@Override
+			public BasicDataSource call() throws Exception {
+				return new BasicDataSource(driverClassName, dbUrl, dbUser, dbPassword, maxPoolSize, jdbcDriverURL);
+			}
+		}, "connecting...");
 	}
 
 }

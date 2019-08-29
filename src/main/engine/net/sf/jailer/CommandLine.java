@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,7 +57,10 @@ public class CommandLine {
 	@Option(name="-c",usage="print restricted data-model with closures")
 	public boolean withClosures = false;
 	
-	@Option(name="-explain",usage="write export-explanation ('explain.log')")
+	@Option(name="-explain",usage="this option is no longer used")
+	public boolean dummyExplain;
+
+	// explain is always false
 	public boolean explain = false;
 
 	@Option(name="-u",usage="consider associations as un-directed")
@@ -96,7 +99,7 @@ public class CommandLine {
 	@Option(name="-where",usage="subject condition", metaVar="SQL-expression")
 	public String where = null;
 	
-	@Option(name="-schemamapping",usage="target schema map", metaVar="<from>=<to>[','<from>=<to>]*")
+	@Option(name="-schemamapping",usage="schema map", metaVar="schema-in-model=schema-in-db[','x=y]*")
 	public String rawschemamapping = null;
 	
 	@Option(name="-source-schemamapping",usage="source schema map", metaVar="<from>=<to>[','<from>=<to>]*")
@@ -137,9 +140,18 @@ public class CommandLine {
 
 	@Option(name="-no-sorting", usage="the exported rows will not be sorted according to foreign key constraints")
 	public boolean noSorting = false;
+
+	@Option(name="-order-by-pk", usage="Orders the exported rows according to the primary key.")
+	public boolean orderByPK = false;
+
+	@Option(name="-independent-working-tables", usage="create working tables that are independent of the extraction model. (Potentially less efficient)")
+	public boolean independentWorkingTables = false;
 	
 	@Option(name="-transactional", usage="import rows in a single transaction")
 	public boolean transactional = false;
+	
+	@Option(name="-isolation-level", usage="isolation level (optional), 1=READ_UNCOMMITTED, 2=READ_COMMITTED, 4=REPEATABLE_READ, 8=SERIALIZABLE")
+	public Integer isolationLevel = null;
 	
 	@Option(name="-no-rowid", usage="use primary keys to determine row identity (instead of rowid-column)")
 	public boolean noRowid = false;
@@ -152,7 +164,13 @@ public class CommandLine {
 
 	@Option(name="-limit-transaction-size", usage="collects the rows using multiple insert operations with a limited number of rows per operation")
 	boolean insertIncrementally = false;
-	
+
+	@Option(name="-abortInCaseOfInconsistency", usage="abort the process if the result is inconsistent due to insufficient transaction isolation")
+	boolean abortInCaseOfInconsistency = false;
+
+	@Option(name="-", usage="do not interpret the next word as an option, even if it begins with '-'. For example, if the username is \"-abc\", use \"- -abc\".")
+	public List<String> escapedWords = new ArrayList<String>();
+
 	@Argument
 	public List<String> arguments = new ArrayList<String>();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,18 +17,24 @@ package net.sf.jailer.ui;
 
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.GridBagConstraints;
 import java.awt.GridLayout;
 import java.awt.Point;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.ComponentEvent;
+import java.awt.event.ComponentListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowFocusListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
@@ -47,7 +53,6 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -55,6 +60,7 @@ import javax.swing.JDialog;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JSeparator;
+import javax.swing.JToggleButton;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
@@ -90,48 +96,52 @@ public class StringSearchPanel extends javax.swing.JPanel {
 		JComponent create(StringSearchPanel searchPanel);
 	}
 
-	public static JButton createSearchButton(final Frame owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess) {
+	public static JToggleButton createSearchButton(final Window owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess) {
 		return createSearchButton(owner, comboBox, titel, onSuccess, false);
 	}
 
-	public static JButton createSearchButton(final Frame owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, boolean alternativeIcon) {
+	public static JToggleButton createSearchButton(final Window owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, boolean alternativeIcon) {
 		return createSearchButton(owner, comboBox, titel, onSuccess, null, alternativeIcon);
 	}
 	
-	public static JButton createSearchButton(final Frame owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, boolean alternativeIcon) {
-		return createSearchButton(owner, comboBox, titel, onSuccess, null, null, null, alternativeIcon, null);
+	public static JToggleButton createSearchButton(final Window owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, boolean alternativeIcon) {
+		return createSearchButton(owner, comboBox, titel, onSuccess, null, null, null, alternativeIcon, null, true);
 	}
 	
-	public static JButton createSearchButton(final Frame owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, final MetaDataSource metaDataSource, final DataModel dataModel) {
-		return createSearchButton(owner, comboBox, titel, onSuccess, prepare, metaDataSource, dataModel, false, null);
+	public static JToggleButton createSearchButton(final Window owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, final MetaDataSource metaDataSource, final DataModel dataModel) {
+		return createSearchButton(owner, comboBox, titel, onSuccess, prepare, metaDataSource, dataModel, false, null, true);
 	}
 
-	public static JButton createSearchButton(final Frame owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, final MetaDataSource metaDataSource, final DataModel dataModel, boolean alternativeIcon, final AdditionalComponentFactory additionalComponentFactory) {
-		final JButton button = new JButton();
+	public static JToggleButton createSearchButton(final Window owner, final javax.swing.JComboBox comboBox, final Object titel, final Runnable onSuccess, final Prepare prepare, final MetaDataSource metaDataSource, final DataModel dataModel, boolean alternativeIcon, final AdditionalComponentFactory additionalComponentFactory, final boolean locateUnderButton) {
+		final JToggleButton button = new JToggleButton();
 		button.setIcon(UIUtil.scaleIcon(button, alternativeIcon? icon2 : icon));
 		button.setToolTipText("Find Table");
 		button.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
 				UIUtil.setWaitCursor(button);
-				SwingUtilities.invokeLater(new Runnable() {
+				UIUtil.invokeLater(4, new Runnable() {
 					@Override
 					public void run() {
 				        try {
-							Point location = button.getLocationOnScreen();
-							StringSearchPanel searchPanel = new StringSearchPanel(comboBox, metaDataSource, dataModel, prepare);
+				        	Point buttonLocation = button.getLocationOnScreen();
+				        	Point location;
+				        	if (locateUnderButton) {
+				        		location = new Point(buttonLocation.x + button.getWidth(), buttonLocation.y);
+				        	} else {
+				        		location = buttonLocation;
+				        	}
+							StringSearchPanel searchPanel = new StringSearchPanel(button, comboBox, metaDataSource, dataModel, prepare, onSuccess);
 							if (additionalComponentFactory != null) {
 								searchPanel.plugInPanel.add(additionalComponentFactory.create(searchPanel), java.awt.BorderLayout.CENTER);
 							} else {
 								searchPanel.plugInPanel.setVisible(false);
 							}
-							String result = searchPanel.find(owner, titel, location.x, location.y);
-							if (result != null && !result.equals(searchPanel.showAllLabel)) {
-								comboBox.setSelectedItem(result);
-								if (onSuccess != null) {
-									onSuccess.run();
-								}
+							Window ownerWindow = owner;
+							if (ownerWindow == null) {
+								ownerWindow = SwingUtilities.getWindowAncestor(comboBox);
 							}
+							searchPanel.find(ownerWindow, titel, location.x, location.y, locateUnderButton);
 				        } finally {
 				        	UIUtil.resetWaitCursor(button);
 				        }
@@ -165,45 +175,105 @@ public class StringSearchPanel extends javax.swing.JPanel {
 		return button;
 	}
 
-	private static void updateEnabledState(JButton button, JComboBox comboBox) {
+	private static void updateEnabledState(JToggleButton button, JComboBox comboBox) {
 		button.setEnabled(comboBox.getModel().getSize() > 1 || comboBox.getModel().getSize() == 1 && !"".equals(comboBox.getModel().getElementAt(0)));
 	}
 
-	public String find(Frame owner, Object titel, int x, int y) {
-		dialog = new EscapableDialog(owner, String.valueOf(titel), true) {
+	private void consumeResult() {
+		if (result != null && !result.equals(showAllLabel)) {
+			combobox.setSelectedItem(result);
+			if (onSuccess != null) {
+				onSuccess.run();
+			}
+		}
+		result = null;
+		button.setSelected(false);
+	}
+
+	public void find(Window owner, Object titel, int x, int y, boolean locateUnderButton) {
+		dialog = owner instanceof Dialog? new EscapableDialog((Dialog) owner, String.valueOf(titel), false) {
+		} : new EscapableDialog((Frame) owner, String.valueOf(titel), false) {
 		};
+		dialog.setUndecorated(true);
+		dialog.addWindowFocusListener(new WindowFocusListener() {
+			@Override
+			public void windowLostFocus(WindowEvent e) {
+				if (!loadingDialogisVisible.get()) {
+					dialog.dispose();
+					consumeResult();
+				}
+			}
+			@Override
+			public void windowGainedFocus(WindowEvent e) {
+			}
+		});
+
+		addComponentListener(new ComponentListener() {
+			@Override
+			public void componentShown(ComponentEvent e) {
+			}
+			@Override
+			public void componentResized(ComponentEvent e) {
+			}
+			@Override
+			public void componentMoved(ComponentEvent e) {
+			}
+			@Override
+			public void componentHidden(ComponentEvent e) {
+				consumeResult();
+			}
+		});
+		
 		dialog.getContentPane().add(this);
+		
+		boolean pv = plugInPanel.isVisible();
+		plugInPanel.setVisible(false);
+		
 		dialog.pack();
+		double mh = 440;
+		double f = searchList.getModel().getSize() / 20.0;
+		if (f < 1) {
+			mh = Math.max(240, mh * f);
+		}
+		int height = Math.max(dialog.getHeight(), (int) mh);
+		if (!locateUnderButton) {
+			y = Math.max(1, y - height);
+		}
 		dialog.setLocation(x, y);
 		int minWidth = metaDataSource == null? 300 : 500;
-		dialog.setSize(Math.max(minWidth, dialog.getWidth()), Math.min(Math.max(dialog.getHeight() + 20, 440), 600));
-		int h = dialog.getHeight();
-		UIUtil.fit(dialog);
-		if (h > dialog.getHeight()) {
-			dialog.setLocation(x, y - (h - dialog.getHeight()));
-			dialog.setSize(Math.max(minWidth, dialog.getWidth()), Math.min(Math.max(dialog.getHeight() + 20, 400), 600));
-			UIUtil.fit(dialog);
+		if (pv) {
+			minWidth *= 2;
 		}
-		
+		dialog.setSize(Math.max(minWidth, dialog.getWidth()), Math.min(height, 600));
+		UIUtil.fit(dialog);
+		plugInPanel.setVisible(pv);
+
 		result = null;
+		button.setSelected(true);
 		dialog.setVisible(true);
-		
-		return result;
 	}
 	
 	private final int MAX_LIST_LENGTH = 100;
 	private boolean showAll = false;
 	private String showAllLabel;
-	
+	 
 	private void updateList() {
 		DefaultListModel<String> matches = new DefaultListModel<String>();
-		String searchText = searchTextField.getText().trim().toUpperCase(Locale.ENGLISH);
+		String text = searchTextField.getText();
+		boolean withPrefix = !text.startsWith(" ");
+		boolean withSuffix = !text.endsWith(" ");
+		String searchText = text.trim().toUpperCase(Locale.ENGLISH);
 		DefaultComboBoxModel<String> model = (DefaultComboBoxModel) combobox.getModel();
 		int size = model.getSize();
 		for (int i = 0; i < size; ++i) {
 			String item = model.getElementAt(i);
 			if (!item.isEmpty()) {
-				if (searchText.isEmpty() || item.toUpperCase(Locale.ENGLISH).contains(searchText)) {
+				if (searchText.isEmpty() 
+						|| withPrefix && withSuffix && item.toUpperCase(Locale.ENGLISH).contains(searchText)
+						|| !withPrefix && withSuffix && item.toUpperCase(Locale.ENGLISH).startsWith(searchText)
+						|| withPrefix && !withSuffix && item.toUpperCase(Locale.ENGLISH).endsWith(searchText)
+						|| !withPrefix && !withSuffix && item.toUpperCase(Locale.ENGLISH).equals(searchText)
+						) {
 					matches.addElement(item);
 					if (!showAll && matches.getSize() > MAX_LIST_LENGTH) {
 						showAllLabel = "show all ...";
@@ -222,18 +292,23 @@ public class StringSearchPanel extends javax.swing.JPanel {
 	private final MetaDataSource metaDataSource;
 	private final DataModel dataModel;
 	private final javax.swing.JComboBox combobox;
+	private final Runnable onSuccess;
+	private final JToggleButton button;
 	
     /**
      * Creates new form StringSearchPanel
+     * @param button 
      * @param dataModel 
      * @param metaDataSource 
      * @param prepare 
      */
-    public StringSearchPanel(javax.swing.JComboBox combobox, MetaDataSource metaDataSource, DataModel dataModel, Prepare prepare) {
+    public StringSearchPanel(JToggleButton button, javax.swing.JComboBox combobox, MetaDataSource metaDataSource, DataModel dataModel, Prepare prepare, final Runnable onSuccess) {
+    	this.button = button;
     	this.combobox = combobox;
     	this.dataModel = dataModel;
     	this.metaDataSource = metaDataSource;
     	this.prepare = prepare;
+    	this.onSuccess = onSuccess;
         initComponents();
         
         if (metaDataSource != null) {
@@ -404,7 +479,7 @@ public class StringSearchPanel extends javax.swing.JPanel {
     	}
 		
 		if (loadVis) {
-			SwingUtilities.invokeLater(new Runnable() {
+			UIUtil.invokeLater(new Runnable() {
 				@Override
 				public void run() {
 					selectSchemas(vis);
@@ -450,9 +525,10 @@ public class StringSearchPanel extends javax.swing.JPanel {
 	}
 
 	private AtomicBoolean cancelLoading = new AtomicBoolean(false);
-	
+	private AtomicBoolean loadingDialogisVisible = new AtomicBoolean(false);
+
 	private void selectSchemas(final List<MDSchema> schemas) {
-		SwingUtilities.invokeLater(new Runnable() {
+		UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 				final List<MDSchema> toLoad = new ArrayList<MDSchema>();
@@ -488,7 +564,7 @@ public class StringSearchPanel extends javax.swing.JPanel {
 								}
 								setCheckboxState(checkboxPerSchema.get(schema), schema, false, true);
 							}
-							SwingUtilities.invokeLater(new Runnable() {
+							UIUtil.invokeLater(new Runnable() {
 								@Override
 								public void run() {
 									loadingDialog.setVisible(false);
@@ -497,7 +573,7 @@ public class StringSearchPanel extends javax.swing.JPanel {
 						}
 		
 						private void setCheckboxState(final JCheckBox checkBox, final MDSchema schema, final boolean waitingState, final boolean selected) {
-							SwingUtilities.invokeLater(new Runnable() {
+							UIUtil.invokeLater(new Runnable() {
 								@Override
 								public void run() {
 									checkBox.setForeground(waitingState? Color.red : null);
@@ -515,8 +591,10 @@ public class StringSearchPanel extends javax.swing.JPanel {
 					loadingDialog.pack();
 					Point los = dialog.getLocationOnScreen();
 					loadingDialog.setLocation(los.x + dialog.getWidth() / 2 - loadingDialog.getWidth() / 2, los.y + dialog.getHeight() / 2 - loadingDialog.getHeight() / 2);
+					loadingDialogisVisible.set(true);
 					loadingDialog.setVisible(true);
 					loadingDialog.dispose();
+					loadingDialogisVisible.set(false);
 				}
 				
 				updateTableList();
@@ -536,8 +614,12 @@ public class StringSearchPanel extends javax.swing.JPanel {
 
         loadingPanel = new javax.swing.JPanel();
         jLabel1 = new javax.swing.JLabel();
-        cancelLoadiingButton = new javax.swing.JButton();
+        cancelLoadiingButton = new javax.swing.JToggleButton();
+        jPanel1 = new javax.swing.JPanel();
+        cancelButton = new javax.swing.JToggleButton();
+        jPanel4 = new javax.swing.JPanel();
         searchTextField = new javax.swing.JTextField();
+        okButton = new javax.swing.JToggleButton();
         jScrollPane1 = new javax.swing.JScrollPane();
         searchList = new javax.swing.JList<>();
         schemaPanel = new javax.swing.JPanel();
@@ -546,10 +628,7 @@ public class StringSearchPanel extends javax.swing.JPanel {
         jPanel3 = new javax.swing.JPanel();
         jLabel2 = new javax.swing.JLabel();
         visPanel = new javax.swing.JPanel();
-        selectAllButton = new javax.swing.JButton();
-        jPanel1 = new javax.swing.JPanel();
-        okButton = new javax.swing.JButton();
-        cancelButton = new javax.swing.JButton();
+        selectAllButton = new javax.swing.JToggleButton();
         plugInPanel = new javax.swing.JPanel();
 
         loadingPanel.setBackground(java.awt.Color.white);
@@ -566,16 +645,51 @@ public class StringSearchPanel extends javax.swing.JPanel {
         });
         loadingPanel.add(cancelLoadiingButton);
 
+        jPanel1.setLayout(new java.awt.GridBagLayout());
+
+        cancelButton.setText("Cancel");
+        cancelButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                cancelButtonActionPerformed(evt);
+            }
+        });
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 2;
+        gridBagConstraints.gridy = 3;
+        jPanel1.add(cancelButton, gridBagConstraints);
+
         setLayout(new java.awt.GridBagLayout());
 
+        jPanel4.setLayout(new java.awt.GridBagLayout());
+
         searchTextField.setText("jTextField1");
+        searchTextField.setToolTipText("<html>Search criteria.<br><br>\nSearch for items that contain the search criteria as:<br>\n<table>\n<tr><td><b>Prefix</b></td><td>if it starts with a space</td></tr>\n<tr><td><b>Suffix</b></td><td>if it ends with a space</td></tr>\n<tr><td><b>Substring</b></td><td>else</td></tr>\n</table>\n</html>\n\n");
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 1;
+        gridBagConstraints.gridy = 1;
+        gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
+        gridBagConstraints.weightx = 1.0;
+        jPanel4.add(searchTextField, gridBagConstraints);
+        searchTextField.getAccessibleContext().setAccessibleDescription("<html>Search criteria.<br><br>\nSearch for items that contain the search criteria as:<br>\n<table>\n<tr><td><b>Prefix</b></td><td>if it starts with a space</td></tr>\n<tr><td><b>Suffix</b></td><td>if it ends with a space</td></tr>\n<tr><td><b>Substring</b></td><td>else</td></tr>\n</table>\n</html>\n\n");
+
+        okButton.setText("  Ok  ");
+        okButton.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                okButtonActionPerformed(evt);
+            }
+        });
+        gridBagConstraints = new java.awt.GridBagConstraints();
+        gridBagConstraints.gridx = 2;
+        gridBagConstraints.gridy = 1;
+        jPanel4.add(okButton, gridBagConstraints);
+
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;
         gridBagConstraints.gridy = 1;
         gridBagConstraints.gridwidth = 2;
         gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
         gridBagConstraints.weightx = 1.0;
-        add(searchTextField, gridBagConstraints);
+        add(jPanel4, gridBagConstraints);
 
         searchList.setModel(new javax.swing.AbstractListModel<String>() {
             String[] strings = { "Item 1", "Item 2", "Item 3", "Item 4", "Item 5" };
@@ -651,45 +765,13 @@ public class StringSearchPanel extends javax.swing.JPanel {
         gridBagConstraints.weighty = 1.0;
         add(schemaPanel, gridBagConstraints);
 
-        jPanel1.setLayout(new java.awt.GridBagLayout());
-
-        okButton.setText(" Ok ");
-        okButton.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                okButtonActionPerformed(evt);
-            }
-        });
-        gridBagConstraints = new java.awt.GridBagConstraints();
-        gridBagConstraints.gridx = 1;
-        gridBagConstraints.gridy = 3;
-        gridBagConstraints.anchor = java.awt.GridBagConstraints.EAST;
-        gridBagConstraints.weightx = 1.0;
-        jPanel1.add(okButton, gridBagConstraints);
-
-        cancelButton.setText("Cancel");
-        cancelButton.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                cancelButtonActionPerformed(evt);
-            }
-        });
-        gridBagConstraints = new java.awt.GridBagConstraints();
-        gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 3;
-        jPanel1.add(cancelButton, gridBagConstraints);
-
-        gridBagConstraints = new java.awt.GridBagConstraints();
-        gridBagConstraints.gridx = 1;
-        gridBagConstraints.gridy = 3;
-        gridBagConstraints.gridwidth = 3;
-        gridBagConstraints.anchor = java.awt.GridBagConstraints.EAST;
-        add(jPanel1, gridBagConstraints);
-
         plugInPanel.setLayout(new java.awt.BorderLayout());
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 10;
         gridBagConstraints.gridy = 1;
         gridBagConstraints.gridheight = 3;
         gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
+        gridBagConstraints.weightx = 0.1;
         add(plugInPanel, gridBagConstraints);
     }// </editor-fold>//GEN-END:initComponents
 
@@ -716,22 +798,23 @@ public class StringSearchPanel extends javax.swing.JPanel {
 
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private javax.swing.JButton cancelButton;
-    private javax.swing.JButton cancelLoadiingButton;
+    private javax.swing.JToggleButton cancelButton;
+    private javax.swing.JToggleButton cancelLoadiingButton;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
     private javax.swing.JPanel jPanel3;
+    private javax.swing.JPanel jPanel4;
     private javax.swing.JScrollPane jScrollPane1;
     private javax.swing.JScrollPane jScrollPane2;
     private javax.swing.JPanel loadingPanel;
-    private javax.swing.JButton okButton;
+    private javax.swing.JToggleButton okButton;
     private javax.swing.JPanel plugInPanel;
     private javax.swing.JPanel schemaPanel;
     private javax.swing.JList<String> searchList;
     private javax.swing.JTextField searchTextField;
-    private javax.swing.JButton selectAllButton;
+    private javax.swing.JToggleButton selectAllButton;
     private javax.swing.JPanel visPanel;
     // End of variables declaration//GEN-END:variables
     

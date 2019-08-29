@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -161,7 +161,7 @@ public class AdditionalSubjectsDialog extends javax.swing.JDialog {
 		GridBagConstraints gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 0;
         gridBagConstraints.gridy = 1;
-        detailsPanel.add(StringSearchPanel.createSearchButton(parent, detailsComboBox, "Find Table", null), gridBagConstraints);
+        detailsPanel.add(StringSearchPanel.createSearchButton(null, detailsComboBox, "Find Table", null), gridBagConstraints);
 
 		gridBagConstraints = new java.awt.GridBagConstraints();
 		gridBagConstraints.gridx = 1;
@@ -187,7 +187,7 @@ public class AdditionalSubjectsDialog extends javax.swing.JDialog {
 			}
 			@Override
 			public void mouseClicked(java.awt.event.MouseEvent evt) {
-				ConditionEditor conditionEditor = new ConditionEditor(AdditionalSubjectsDialog.this.parent, parametersGetter, AdditionalSubjectsDialog.this.extractionModel.dataModel);
+				ConditionEditor conditionEditor = new ConditionEditor(AdditionalSubjectsDialog.this.parent, parametersGetter, AdditionalSubjectsDialog.this.extractionModel.dataModel, null);
 				Object item = detailsComboBox.getSelectedItem();
 				conditionEditor.setTitle("");
 				Table table = null;
@@ -197,8 +197,8 @@ public class AdditionalSubjectsDialog extends javax.swing.JDialog {
 				}
 				String cond = conditionEditor.edit(detailsCondtition.getText(), "Subject", "T", table, null, null, null, false, true);
 				if (cond != null) {
-					if (!detailsCondtition.getText().equals(ConditionEditor.toSingleLine(cond))) {
-						detailsCondtition.setText(ConditionEditor.toSingleLine(cond));
+					if (!detailsCondtition.getText().equals((cond))) {
+						detailsCondtition.setText((cond));
 					}
 					detailsLabel.setIcon(conditionEditorIcon);
 				}
@@ -264,7 +264,12 @@ public class AdditionalSubjectsDialog extends javax.swing.JDialog {
 			isolated.add(sub);
 		}
 
-		Set<Table> closure = subject.closure(true);
+		Set<Table> closure;
+		if (subject != null) {
+			closure = subject.closure(true);
+		} else {
+			closure = new HashSet<Table>();
+		}
 
 		remainingIsolated.clear();
 		remainingIsolated.addAll(remaining);
@@ -305,6 +310,7 @@ public class AdditionalSubjectsDialog extends javax.swing.JDialog {
 
         detailsPanel.setLayout(new java.awt.GridBagLayout());
 
+        detailsComboBox.setMaximumRowCount(20);
         detailsComboBox.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 1;

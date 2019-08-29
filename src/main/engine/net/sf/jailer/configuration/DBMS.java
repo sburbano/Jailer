@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,6 +73,7 @@ public class DBMS {
 	 */
 	public DBMS(DBMS other) {
 		this.id = other.id;
+		this.familyId = other.familyId;
 		this.displayName = other.displayName;
 		this.urlPattern = other.urlPattern;
 		this.testQuery = other.testQuery;
@@ -126,6 +127,8 @@ public class DBMS {
 		this.objectRenderers = other.objectRenderers;
 		this.procedureDetailNeedsSpecificName = other.procedureDetailNeedsSpecificName;
 		this.limitTransactionSize = other.limitTransactionSize;
+		this.defaultSchemaQuery = other.defaultSchemaQuery;
+		this.fetchSize = other.fetchSize;
 	}
 
 	/**
@@ -179,6 +182,7 @@ public class DBMS {
 	}
 	
 	private String id;
+	private String familyId;
 	private String displayName;
 	
 	/**
@@ -304,6 +308,7 @@ public class DBMS {
 	private String indexInfoQuery = null;
 	private String identifierQuoteString = "\"";
 
+	private String explainCreateExplainTable = null;
 	private String explainPrepare = null;
 	private String explainQuery = null;
 	private String explainCleanup = null;
@@ -312,6 +317,10 @@ public class DBMS {
 	private String procedureSourceQuery;
 	private String packageSourceQuery;
 	private String packageNamesQuery;
+	private String defaultSchemaQuery;
+	
+	private Integer fetchSize = null;
+
 	private List<DatabaseObjectRenderingDescription> objectRenderers = new ArrayList<DatabaseObjectRenderingDescription>();
 	private boolean procedureDetailNeedsSpecificName = false;
 
@@ -922,6 +931,14 @@ public class DBMS {
 		this.id = id;
 	}
 
+	public String getFamilyId() {
+		return familyId;
+	}
+
+	public void setFamilyId(String familyId) {
+		this.familyId = familyId;
+	}
+
 	public String getDisplayName() {
 		return displayName;
 	}
@@ -936,6 +953,14 @@ public class DBMS {
 
 	public void setExplainPrepare(String explainPrepare) {
 		this.explainPrepare = explainPrepare;
+	}
+
+	public String getExplainCreateExplainTable() {
+		return explainCreateExplainTable;
+	}
+
+	public void setExplainCreateExplainTable(String explainCreateExplainTable) {
+		this.explainCreateExplainTable = explainCreateExplainTable;
 	}
 
 	public String getExplainQuery() {
@@ -1057,6 +1082,20 @@ public class DBMS {
 	}
 
 	/**
+	 * Gets query to get default schema of the user.
+	 */
+	public String getDefaultSchemaQuery() {
+		return defaultSchemaQuery;
+	}
+
+	/**
+	 * Sets query to get default schema of the user.
+	 */
+	public void setDefaultSchemaQuery(String defaultSchemaQuery) {
+		this.defaultSchemaQuery = defaultSchemaQuery;
+	}
+
+	/**
 	 * Information about how to to limit transaction size (never <code>null</code>).
 	 */
 	@XmlElement
@@ -1072,6 +1111,24 @@ public class DBMS {
 	 */
 	public void setLimitTransactionSize(LimitTransactionSizeInfo incremenalInsertInfo) {
 		this.limitTransactionSize = incremenalInsertInfo;
+	}
+
+	/**
+	 * Gets fetch size.
+	 * 
+	 * @return fetch size
+	 */
+	public Integer getFetchSize() {
+		return fetchSize;
+	}
+
+	/**
+	 * Sets fetch size.
+	 * 
+	 * @param fetchSize fetch size
+	 */
+	public void setFetchSize(Integer fetchSize) {
+		this.fetchSize = fetchSize;
 	}
 
 	/* (non-Javadoc)
@@ -1097,11 +1154,13 @@ public class DBMS {
 			return false;
 		}
 		DBMS other = (DBMS) obj;
-		if (id == null) {
-			if (other.id != null) {
+		String fid = familyId != null? familyId : id;
+		String otherFid = other.familyId != null? other.familyId : other.id;
+		if (fid == null) {
+			if (otherFid != null) {
 				return false;
 			}
-		} else if (!id.equals(other.id)) {
+		} else if (!fid.equals(otherFid)) {
 			return false;
 		}
 		return true;

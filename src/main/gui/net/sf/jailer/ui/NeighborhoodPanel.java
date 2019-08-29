@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import java.util.Set;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.SwingUtilities;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 
@@ -43,6 +42,7 @@ import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.DataModel;
 import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.ui.graphical_view.GraphicalDataModelView;
+import net.sf.jailer.ui.util.UISettings;
 
 /**
  * Neighborhood Panel.
@@ -171,7 +171,7 @@ public class NeighborhoodPanel extends javax.swing.JPanel {
 								}
 								@Override
 								public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
-									SwingUtilities.invokeLater(new Runnable() {
+									UIUtil.invokeLater(new Runnable() {
 										@Override
 										public void run() {
 											initTableList(dataModel, table, hideIgnored, graphView);
@@ -188,9 +188,15 @@ public class NeighborhoodPanel extends javax.swing.JPanel {
 					@Override
 					protected void onLeftClick(MouseEvent e) {
 						if (!graphView.isTableVisible(t)) {
+							++UISettings.s9;
 							graphView.showTable(table, t);
 							initTableList(dataModel, table, hideIgnored, graphView);
 							createTableLinks(dataModel, table, graphView, hideIgnored);
+						}
+						if (e.getClickCount() > 1) {
+							graphView.selectTable(t);
+						} else {
+							graphView.startScrollTimer(t);
 						}
 					}
 				});

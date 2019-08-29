@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ import org.fife.ui.rtextarea.RTextScrollPane;
 
 import net.sf.jailer.ExecutionContext;
 import net.sf.jailer.database.Session;
+import net.sf.jailer.ui.Environment;
 import net.sf.jailer.ui.UIUtil;
 import net.sf.jailer.ui.databrowser.metadata.MetaDataSource;
 import net.sf.jailer.ui.databrowser.sqlconsole.MetaDataBasedSQLCompletionProvider;
@@ -125,7 +126,7 @@ public class SQLDMLPanel extends javax.swing.JPanel {
 			}
 		});
 		
-		SwingUtilities.invokeLater(new Runnable() {
+		UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 				sqlConsoleButton.grabFocus();
@@ -390,7 +391,7 @@ public class SQLDMLPanel extends javax.swing.JPanel {
 		if (JOptionPane.YES_OPTION == JOptionPane.showConfirmDialog(this, "Execute Statements?", "Execute", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE)) {
 			String sqlFile;
 			try {
-				String sqlFileBase = "temp_" + System.currentTimeMillis();
+				String sqlFileBase = Environment.newFile("temp_" + System.currentTimeMillis()).getPath();
 				for (int i = 0; ; ++i) {
 					sqlFile = sqlFileBase + i + ".sql";
 					if (!new File(sqlFile).exists()) {

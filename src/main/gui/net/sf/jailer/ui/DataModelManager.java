@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -151,13 +151,12 @@ public class DataModelManager {
 	public static void createNewModel(String newName, String folderName, ExecutionContext executionContext) throws IOException {
 		setCurrentModelSubfolder(null, executionContext);
 		File modelFolder = new File(getBaseFolder(executionContext) + File.separator + folderName);
-		if (modelFolder.exists()) {
-			throw new IOException("Folder \"" + modelFolder.getAbsolutePath() + "\" already exists");
+		if (!modelFolder.exists()) {
+			if (!modelFolder.mkdir()) {
+				throw new IOException("Unable to create folder \"" + modelFolder.getAbsolutePath() + "\"");
+			}
 		}
-		if (!modelFolder.mkdir()) {
-			throw new IOException("Unable to create folder \"" + modelFolder.getAbsolutePath() + "\"");
-		}
-
+		
 		setCurrentModelSubfolder(folderName, executionContext);
 
 		for (String file : new String[] { DataModel.getTablesFile(executionContext), DataModel.getAssociationsFile(executionContext), DataModel.getColumnsFile(executionContext) }) {

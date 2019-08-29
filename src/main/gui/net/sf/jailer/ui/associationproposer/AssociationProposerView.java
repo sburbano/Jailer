@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,14 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,13 +41,13 @@ import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
 import javax.swing.RowSorter.SortKey;
 import javax.swing.SortOrder;
 import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionEvent;
@@ -70,6 +73,7 @@ import net.sf.jailer.ui.syntaxtextarea.RSyntaxTextAreaWithSQLSyntaxStyle;
 import net.sf.jailer.ui.syntaxtextarea.SQLAutoCompletion;
 import net.sf.jailer.ui.syntaxtextarea.SQLCompletionProvider;
 import net.sf.jailer.util.CsvFile;
+import net.sf.jailer.util.Pair;
 import net.sf.jailer.util.Quoting;
 
 /**
@@ -246,7 +250,7 @@ public class AssociationProposerView extends javax.swing.JPanel {
 			loadButton.setVisible(false);
 			emptyLineCheckBox.setSelected(true);
 			emptyLineCheckBox.setVisible(false);
-			SwingUtilities.invokeLater(new Runnable() {
+			UIUtil.invokeLater(new Runnable() {
 				@Override
 				public void run() {
 					loadSQLScript(scriptFile);
@@ -386,22 +390,40 @@ public class AssociationProposerView extends javax.swing.JPanel {
 							}
 						}
 						bufferedReader.close();
-						SwingUtilities.invokeLater(new Runnable() {
+						UIUtil.invokeLater(new Runnable() {
 							@Override
 							public void run() {
-								addResult(1000L, associationProposer.pickUpNewAssociations(), associationProposer.pickUpKnownAssociations(), null);
+								addResult(1000L, sort(associationProposer.pickUpNewAssociations()), sort(associationProposer.pickUpKnownAssociations()), null);
 								jProgressBar1.setValue(1000);
 								loadButton.setEnabled(true);
 								acceptButton.grabFocus();
+							}
+							private List<Association> sort(List<Association> associations) {
+								Collections.sort(associations, new Comparator<Association>() {
+									@Override
+									public int compare(Association o1, Association o2) {
+										int sourceDiff = o1.source.getName().compareTo(o2.source.getName());
+										if (sourceDiff != 0) {
+											return sourceDiff;
+										}
+										int destinationDiff = o1.destination.getName().compareTo(o2.destination.getName());
+										if (destinationDiff != 0) {
+											return destinationDiff;
+										}
+										return o1.getUnrestrictedJoinCondition().compareTo(o2.getUnrestrictedJoinCondition());
+									}
+								});
+								return associations;
 							}
 						});
 					} catch (Throwable e) {
 						final Throwable fe = e;
 						final String title = "Error in file \"" + file.getName() + "\" at line " + lineNr;
-						SwingUtilities.invokeLater(new Runnable() {
+						final Object exceptionContext = (e instanceof IOException || e instanceof FileNotFoundException)? UIUtil.EXCEPTION_CONTEXT_USER_ERROR : null;
+						UIUtil.invokeLater(new Runnable() {
 							@Override
 							public void run() {
-								UIUtil.showException(AssociationProposerView.this, title, fe, UIUtil.EXCEPTION_CONTEXT_USER_ERROR);
+								UIUtil.showException(AssociationProposerView.this, title, fe, exceptionContext);
 								loadButton.setEnabled(true);
 							}
 						});
@@ -418,7 +440,7 @@ public class AssociationProposerView extends javax.swing.JPanel {
     private final int MAX_ERRORS = 1000;
 
     private void addResult(final long progess, final List<Association> associations, final List<Association> knownAssociations, final String error) {
-    	SwingUtilities.invokeLater(new Runnable() {
+    	UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 		    	if (error != null) {
@@ -930,18 +952,36 @@ public class AssociationProposerView extends javax.swing.JPanel {
     		
     		BufferedWriter out = new BufferedWriter(new FileWriter(ModelBuilder.getModelBuilderAssociationsFilename(executionContext)));
     		out.append("\n");
+    		AssociationProposer ap = new AssociationProposer(dataModel);
+    		int knownCount = 0;
+    		int allCount = 0;
     		for (int i = 0; i < proposalsModel.getRowCount(); ++i) {
     			if (Boolean.TRUE.equals(proposalsModel.getValueAt(i, 0))) {
 	    			String condition = String.valueOf(proposalsModel.getValueAt(i, 3));
 	    			condition = condition.replaceAll(" *\\n", " ");
-	    			out.append(
-	    					CsvFile.encodeCell(String.valueOf(proposalsModel.getValueAt(i, 1))) + "; " +
-	    					CsvFile.encodeCell(String.valueOf(proposalsModel.getValueAt(i, 2))) + "; ; ; " +
-	    					CsvFile.encodeCell(condition) + "; " + names.get(i) + "; " + DataModelEditor.DATA_MODEL_EDITOR_AUTHOR + "\n");
+	    			String fromName = proposalsModel.getValueAt(i, 1).toString();
+					String toName = proposalsModel.getValueAt(i, 2).toString();
+					Table from = dataModel.getTable(fromName);
+					Table to = dataModel.getTable(toName);
+					if (from != null && to != null) {
+						++allCount;
+						Association association = new Association(from, to, false, false, condition, dataModel, false, null);
+						if (ap.addAssociation(names.get(i), new Pair<Table, Table>(from, to), association, true)) {
+							out.append(
+		    					CsvFile.encodeCell(String.valueOf(fromName)) + "; " +
+		    					CsvFile.encodeCell(String.valueOf(toName)) + "; ; ; " +
+		    					CsvFile.encodeCell(condition) + "; " + names.get(i) + "; " + DataModelEditor.DATA_MODEL_EDITOR_AUTHOR + "\n");
+						} else {
+							++knownCount;
+						}
+					}
     			}
     		}
     		out.close();
     		accepted = true;
+    		if (knownCount > 0) {
+    			JOptionPane.showMessageDialog(dialog, knownCount + " of " + allCount + " associations are already known.", "", JOptionPane.INFORMATION_MESSAGE);
+    		}
     		dialog.dispose();
     	} catch (Throwable t) {
     		UIUtil.showException(this, "Error", t);

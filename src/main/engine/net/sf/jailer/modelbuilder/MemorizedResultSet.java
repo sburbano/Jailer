@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,6 +92,14 @@ public class MemorizedResultSet implements ResultSet {
 		prepareHook(rmd);
 		CellContentConverter cellContentConverter = new CellContentConverter(rmd, session, session.dbms);
 		final int numCol = projection == null? rmd.getColumnCount() : projection.length;
+		
+		final String[] names = new String[numCol];
+		final int[] types = new int[numCol];
+		for (int i = 1; i <= numCol; ++i) {
+			names[i - 1] = columnNames == null? rmd.getColumnName(projection == null? i : projection[i - 1]) : columnNames[i - 1];
+			types[i - 1] = rmd.getColumnType(projection == null? i : projection[i - 1]);
+		}
+
 		while (resultSet.next()) {
 			readRowHook(resultSet);
 			Object[] row = new Object[numCol];
@@ -105,13 +113,6 @@ public class MemorizedResultSet implements ResultSet {
 			if (cancellationContext != null) {
 				CancellationHandler.checkForCancellation(cancellationContext);
 			}
-		}
-
-		final String[] names = new String[numCol];
-		final int[] types = new int[numCol];
-		for (int i = 1; i <= numCol; ++i) {
-			names[i - 1] = columnNames == null? rmd.getColumnName(projection == null? i : projection[i - 1]) : columnNames[i - 1];
-			types[i - 1] = rmd.getColumnType(projection == null? i : projection[i - 1]);
 		}
 		resultSetMetaData = new MemorizedResultSetMetaData(numCol, names, types);
 	}
@@ -143,8 +144,9 @@ public class MemorizedResultSet implements ResultSet {
 		Object c;
 		if (columnIndex > row.length) {
 			c = null;
+		} else {
+			c = row[columnIndex - 1];
 		}
-		c = row[columnIndex - 1];
 		wasNull = c == null;
 		return c;
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,15 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import net.sf.jailer.configuration.Configuration;
+import net.sf.jailer.datamodel.DataModel;
+import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.ui.Environment;
 
 /**
@@ -38,6 +44,16 @@ public class UISettings  {
 	public static final String USE_NATIVE_PLAF = "USE_NATIVE_PLAF";
 
 	/**
+	 * Name of property holding the "recent files".
+	 */
+	public static final String RECENT_FILES = "RECENT_FILES";
+
+	/**
+	 * Name of property holding the "recent connection aliases".
+	 */
+	public static final String RECENT_ALIASES = "RECENT_ALIASES";
+
+	/**
 	 * Persistent properties.
 	 */
 	private static Map<String, Object> properties;
@@ -48,7 +64,7 @@ public class UISettings  {
 	private static final String FILENAME = ".uisettings";
 
 	@SuppressWarnings("unchecked")
-	private static void loadUISettings() {
+	private static synchronized void loadUISettings() {
 		if (properties == null) {
 			properties = new HashMap<String, Object>();
 			File file = Environment.newFile(FILENAME);
@@ -74,19 +90,20 @@ public class UISettings  {
 		loadUISettings();
 		properties.put(name, value);
 		File file = Environment.newFile(FILENAME);
-		if (file.exists()) {
+		for (int retry = 0; retry < 4; ++retry) {
 			try {
-				file.delete();
+				ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(file));
+				out.writeObject(properties);
+				out.close();
+				return;
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
-		}
-		try {
-			ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(file));
-			out.writeObject(properties);
-			out.close();
-		} catch (Exception e) {
-			e.printStackTrace();
+			try {
+				Thread.sleep(100);
+			} catch (InterruptedException e) {
+				// ignore
+			}
 		}
 	}
 
@@ -99,5 +116,111 @@ public class UISettings  {
 		loadUISettings();
 		return properties.get(name);
 	}
+
+	public static int s1, s2, s3, s4, s5, s6, s7, s8, s9;
+	public static String s10;
 	
+	public synchronized static void storeStats() {
+		int i = 1;
+		StringBuilder sb = new StringBuilder();
+		for (int s: new int[] { s1, s2, s3, s4, s5, s6, s7, s8, s9 }) {
+			if (s != 0) {
+				sb.append("&s" + i + "=" + s);
+			}
+			++i;
+		}
+		if (s10 != null) {
+			sb.append("&s10=" + s10);
+		}
+		store("stats", sb.toString());
+	}
+
+	public synchronized static String restoreStats() {
+		Object stats = restore("stats");
+		if (stats != null) {
+			store("stats", null);
+			return stats.toString();
+		}
+		return "";
+	}
+
+	public static void dmStats(DataModel dataModel) {
+		if (dataModel != null) {
+			s1 = Math.max(UISettings.s1, dataModel.getTables().size());
+			ArrayList<Integer> nc = new ArrayList<Integer>();
+			int numA = 0;
+			for (Table table: dataModel.getTables()) {
+				nc.add(table.getColumns().size());
+				if (table.associations != null) {
+					numA += table.associations.size();
+				}
+			}
+			if (!nc.isEmpty()) {
+				Collections.sort(nc);
+				int mid = Math.min(Math.max(nc.size() / 2, 0), nc.size() - 1);
+				s8 = Math.min(nc.get(mid), 999) + 1000 * nc.get(nc.size() - 1);
+				s5 = (s5 % 1000) + 1000 * (numA / 2);
+			}
+		}
+	}
+
+	private static boolean isSbeModel(File file) {
+		try {
+			File pFile = file.getParentFile();
+			return pFile != null && pFile.getName() != null && "by-example".equals(pFile.getName());
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	public static List<File> loadRecentFiles() {
+		Object files = restore(RECENT_FILES);
+		List<File> result = new ArrayList<File>();
+		if (files instanceof List) {
+			for (File file: (List<File>) files) {
+				if (!isSbeModel(file) && !Configuration.getInstance().isTempFile(file)) {
+					result.add(file);
+				}
+			}
+		}
+		return result;
+	}
+
+	public static void addRecentFile(File file) {
+		if (!isSbeModel(file) && !Configuration.getInstance().isTempFile(file)) {
+			final int MAX_FILES = 100;
+			List<File> files = loadRecentFiles();
+			files.remove(file);
+			files.add(0, file);
+			if (MAX_FILES < files.size()) {
+				files.remove(files.size() - 1);
+			}
+			store(RECENT_FILES, files);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	public static List<String> loadRecentConnectionAliases() {
+		Object files = restore(RECENT_ALIASES);
+		List<String> result = new ArrayList<String>();
+		if (files instanceof List) {
+			for (String alias: (List<String>) files) {
+				result.add(alias);
+			}
+		}
+		return result;
+	}
+	
+	public static void addRecentConnectionAliases(String alias) {
+		final int MAX_ALIASES = 100;
+		List<String> aliases = loadRecentConnectionAliases();
+		aliases.remove(alias);
+		aliases.add(0, alias);
+		if (MAX_ALIASES < aliases.size()) {
+			aliases.remove(aliases.size() - 1);
+		}
+		store(RECENT_ALIASES, aliases);
+	}
+
 }

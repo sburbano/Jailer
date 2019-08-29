@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
-import javax.swing.SwingUtilities;
 
 import org.fife.rsta.ui.EscapableDialog;
 
@@ -62,7 +61,7 @@ public class ConditionEditor extends EscapableDialog {
 	private DataModelBasedSQLCompletionProvider provider;
 
 	/** Creates new form ConditionEditor */
-	public ConditionEditor(java.awt.Frame parent, ParameterSelector.ParametersGetter parametersGetter, DataModel dataModel) {
+	public ConditionEditor(java.awt.Frame parent, ParameterSelector.ParametersGetter parametersGetter, DataModel dataModel, String altTitel) {
 		super(parent, true);
 		initComponents();
 		this.editorPane = new RSyntaxTextAreaWithSQLSyntaxStyle(false, false) {
@@ -81,7 +80,7 @@ public class ConditionEditor extends EscapableDialog {
 		gridBagConstraints.fill = java.awt.GridBagConstraints.BOTH;
 		gridBagConstraints.weightx = 1.0;
 		gridBagConstraints.weighty = 0;
-		JLabel where = new JLabel(" Where");
+		JLabel where = new JLabel(" " + (altTitel != null? altTitel : "Where"));
 		where.setForeground(new Color(0, 0, 255));
 		jPanel1.add(where, gridBagConstraints);
 		
@@ -238,7 +237,7 @@ public class ConditionEditor extends EscapableDialog {
         gridBagConstraints.insets = new java.awt.Insets(4, 0, 3, 0);
         jPanel2.add(table1label, gridBagConstraints);
 
-        table1name.setFont(new java.awt.Font("DejaVu Sans", 0, 12)); // NOI18N
+        table1name.setFont(table1name.getFont().deriveFont(table1name.getFont().getSize()+1f));
         table1name.setText("jLabel1");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 3;
@@ -247,7 +246,7 @@ public class ConditionEditor extends EscapableDialog {
         gridBagConstraints.insets = new java.awt.Insets(4, 0, 3, 0);
         jPanel2.add(table1name, gridBagConstraints);
 
-        table1dropDown.setFont(new java.awt.Font("DejaVu Sans", 0, 12)); // NOI18N
+        table1dropDown.setFont(table1dropDown.getFont().deriveFont(table1dropDown.getFont().getSize()+1f));
         table1dropDown.setText("jLabel1");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 2;
@@ -271,7 +270,7 @@ public class ConditionEditor extends EscapableDialog {
         gridBagConstraints.insets = new java.awt.Insets(0, 0, 4, 0);
         jPanel2.add(table2label, gridBagConstraints);
 
-        table2name.setFont(new java.awt.Font("DejaVu Sans", 0, 12)); // NOI18N
+        table2name.setFont(table2name.getFont().deriveFont(table2name.getFont().getSize()+1f));
         table2name.setText("jLabel2");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 3;
@@ -280,7 +279,7 @@ public class ConditionEditor extends EscapableDialog {
         gridBagConstraints.insets = new java.awt.Insets(0, 0, 4, 0);
         jPanel2.add(table2name, gridBagConstraints);
 
-        table2dropDown.setFont(new java.awt.Font("DejaVu Sans", 0, 12)); // NOI18N
+        table2dropDown.setFont(table2dropDown.getFont().deriveFont(table2dropDown.getFont().getSize()+1f));
         table2dropDown.setText("jLabel2");
         gridBagConstraints = new java.awt.GridBagConstraints();
         gridBagConstraints.gridx = 2;
@@ -421,7 +420,6 @@ public class ConditionEditor extends EscapableDialog {
 	 * @return new condition or <code>null</code>, if user canceled the editor
 	 */
 	public String edit(String condition, String table1label, String table1alias, Table table1, String table2label, String table2alias, Table table2, boolean addPseudoColumns, boolean addConvertSubqueryButton) {
-		condition = toMultiLine(condition);
 		if (Pattern.compile("\\bselect\\b", Pattern.CASE_INSENSITIVE|Pattern.DOTALL).matcher(condition).find()) {
 			condition = new BasicFormatterImpl().format(condition);
 		}
@@ -477,7 +475,7 @@ public class ConditionEditor extends EscapableDialog {
 				provider.addAlias(table2alias, table2);
 			}
 		}
-		SwingUtilities.invokeLater(new Runnable() {
+		UIUtil.invokeLater(new Runnable() {
 			@Override
 			public void run() {
 				editorPane.grabFocus();
@@ -545,57 +543,6 @@ public class ConditionEditor extends EscapableDialog {
         }
 	}
 
-	/**
-	 * Converts multi-line text into single line presentation.
-	 */
-	public static String toSingleLine(String s) {
-		return s;
-		// TODO this doesn't seem to work
-//		StringBuilder sb = new StringBuilder();
-//		for (int i = 0; i < s.length(); ++i) {
-//			char c = s.charAt(i);
-//			if (c == '\\') {
-//				sb.append("\\\\");
-//			} else if (c == '\n') {
-//				sb.append("\\n");
-//			} else if (c == '\r') {
-//				sb.append("\\r");
-//			} else {
-//				sb.append(c);
-//			}
-//		}
-//		return sb.toString();
-	}
-
-	/**
-	 * Converts single line presentation into multi-line text.
-	 */
-	public static String toMultiLine(String s) {
-		return s;
-		// TODO this doesn't seem to work
-//		StringBuilder sb = new StringBuilder();
-//		boolean esc = false;
-//		for (int i = 0; i < s.length(); ++i) {
-//			char c = s.charAt(i);
-//			if (c == '\\') {
-//				if (esc) {
-//					esc = false;
-//				} else {
-//					esc = true;
-//					continue;
-//				}
-//			}
-//			if (esc && c == 'n') {
-//				c = '\n';
-//			} else if (esc && c == 'r') {
-//				c = '\r';
-//			}
-//			sb.append(c);
-//			esc = false;
-//		}
-//		return sb.toString();
-	}
-	
     // Variables declaration - do not modify//GEN-BEGIN:variables
     public javax.swing.JPanel addOnPanel;
     private javax.swing.JButton cancelButton;

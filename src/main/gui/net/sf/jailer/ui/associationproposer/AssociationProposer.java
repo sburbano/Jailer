@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,13 +28,12 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.Stack;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.DataModel;
 import net.sf.jailer.util.Pair;
 import net.sf.jailer.util.Quoting;
+import net.sf.jailer.util.SqlUtil;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.AllComparisonExpression;
 import net.sf.jsqlparser.expression.AnalyticExpression;
@@ -108,8 +107,6 @@ import net.sf.jsqlparser.statement.upsert.Upsert;
  */
 public class AssociationProposer {
 
-	private String[] FUNCTIONS_TO_IGNORE = new String[] { "XMLSERIALIZE", "XMLFOREST" };
-
 	private final DataModel dataModel;
 	private final Map<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Table> columnToTable = new IdentityHashMap<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Table>();
 	private final Set<Equation> equations = new HashSet<Equation>();
@@ -140,10 +137,7 @@ public class AssociationProposer {
 	 * @return an error message if statement is invalid, else <code>null</code>
 	 */
 	public synchronized String analyze(String sqlStatement, int startLineNumber) {
-		sqlStatement = removeCommentsAndLiterals(sqlStatement);
-		for (String function : FUNCTIONS_TO_IGNORE) {
-			sqlStatement = removeFunction(function, sqlStatement);
-		}
+		sqlStatement = SqlUtil.removeNonMeaningfulFragments(sqlStatement);
 		net.sf.jsqlparser.statement.Statement st;
 		try {
 			st = CCJSqlParserUtil.parse(sqlStatement);
@@ -162,88 +156,7 @@ public class AssociationProposer {
 		st.accept(new APStatementVisitor());
 		closeEquations();
 		proposeJoinConditions();
-		sqlStatement = st.toString();
 		return null;
-	}
-
-	private String removeFunction(String function, String sqlStatement) {
-		Pattern pattern = Pattern.compile("(\\b\\w+\\b)|\\(\\)|.", Pattern.DOTALL);
-		Matcher matcher = pattern.matcher(sqlStatement);
-		int level = 0;
-		Integer funcLevel = null;
-		boolean result = matcher.find();
-		StringBuffer sb = new StringBuffer();
-		if (result) {
-			do {
-				String token = matcher.group(0);
-				if ("(".equals(token)) {
-					++level;
-				} else if (")".equals(token)) {
-					--level;
-				}
-
-				int l = token.length();
-				matcher.appendReplacement(sb, "");
-				if (function.equalsIgnoreCase(token)) {
-					if (funcLevel == null) {
-						funcLevel = level;
-						--l;
-						sb.append("1");
-					}
-				}
-				if (funcLevel != null) {
-					while (l > 0) {
-						--l;
-						sb.append(' ');
-					}
-				} else {
-					sb.append(token);
-				}
-				if (funcLevel != null && ")".equals(token)) {
-					if (funcLevel == level) {
-						funcLevel = null;
-					}
-				}
-				result = matcher.find();
-			} while (result);
-		}
-		matcher.appendTail(sb);
-		return sb.toString();
-	}
-
-	/**
-	 * Removes comments and literals from SQL statement.
-	 * 
-	 * @param statement
-	 *            the statement
-	 * 
-	 * @return statement the statement without comments and literals
-	 */
-	private String removeCommentsAndLiterals(String statement) {
-		Pattern pattern = Pattern.compile("('([^']*'))|(/\\*.*?\\*/)|(\\-\\-.*?(?=\n|$))", Pattern.DOTALL);
-		Matcher matcher = pattern.matcher(statement);
-		boolean result = matcher.find();
-		StringBuffer sb = new StringBuffer();
-		if (result) {
-			do {
-				int l = matcher.group(0).length();
-				matcher.appendReplacement(sb, "");
-				if (matcher.group(1) != null) {
-					l -= 2;
-					sb.append("'");
-				}
-				while (l > 0) {
-					--l;
-					sb.append(' ');
-				}
-				if (matcher.group(1) != null) {
-					sb.append("'");
-				}
-				result = matcher.find();
-			} while (result);
-		}
-		matcher.appendTail(sb);
-		return sb.toString();
 	}
 
 	/**
@@ -577,8 +490,10 @@ public class AssociationProposer {
 								net.sf.jailer.datamodel.Column rightColumn = getColumn(right);
 								if (rightColumn != null) {
 									boolean sameTable = false;
-									String leftAlias = ((Column) leftExpression).getTable().getName();
-									String rightAlias = ((Column) rightExpression).getTable().getName();
+									Table leftTable = ((Column) leftExpression).getTable();
+									String leftAlias = leftTable != null? leftTable.getName() : null;
+									Table rightTable = ((Column) rightExpression).getTable();
+									String rightAlias = rightTable != null? rightTable.getName() : null;
 									if (leftAlias != null && rightAlias != null) {
 										if (Quoting.equalsIgnoreQuotingAndCase(leftAlias, rightAlias)) {
 											sameTable = true;
@@ -613,7 +528,10 @@ public class AssociationProposer {
 		}
 
 		private net.sf.jailer.datamodel.Column getColumn(Column column) {
-			String alias = column.getTable().getName();
+			String alias = null;
+			if (column.getTable() != null) {
+				alias = column.getTable().getName();
+			}
 			Set<String> tableCandidat = new HashSet<String>();
 			for (boolean withSchema: new boolean[] { true, false }) {
 				for (int i = scopes.size() - 1; i >= 0; --i) {
@@ -671,15 +589,15 @@ public class AssociationProposer {
 		public final net.sf.jailer.datamodel.Column a;
 		public final String aliasB;
 		public final net.sf.jailer.datamodel.Column b;
-		public final boolean isTransient;
+		public final boolean isTransitive;
 		public Equation reversal;
 		
-		public Equation(String aliasA, net.sf.jailer.datamodel.Column a, String aliasB, net.sf.jailer.datamodel.Column b, boolean isTransient) {
+		public Equation(String aliasA, net.sf.jailer.datamodel.Column a, String aliasB, net.sf.jailer.datamodel.Column b, boolean isTransive) {
 			this.aliasA = aliasA;
 			this.aliasB = aliasB;
 			this.a = a;
 			this.b = b;
-			this.isTransient = isTransient;
+			this.isTransitive = isTransive;
 		}
 		
 		public String toString() {
@@ -783,31 +701,47 @@ public class AssociationProposer {
 			}
 			
 			for (Pair<String, String> aliasesPair: aliasesPairs) {
-				boolean hasNonTransientEquation = false;
-				StringBuilder sb = new StringBuilder();
+				StringBuilder condition = new StringBuilder();
+				StringBuilder conditionNonTransitive = new StringBuilder();
 				Set<Equation> seen = new HashSet<Equation>();
-				for (Equation e: theEquations) {
-					if (e.aliasA.equals(aliasesPair.a) && e.aliasB.equals(aliasesPair.b)) {
-						if (e.reversal == null || !seen.contains(e.reversal)) {
-							seen.add(e);
-							if (!e.isTransient) {
-								hasNonTransientEquation = true;
+				for (boolean transitive: new boolean[] { false, true }) { // non-transitive first
+					for (Equation e: theEquations) {
+						if (e.isTransitive == transitive) {
+							if (e.aliasA.equals(aliasesPair.a) && e.aliasB.equals(aliasesPair.b)) {
+								if (e.reversal == null || !seen.contains(e.reversal)) {
+									seen.add(e);
+									if (!e.isTransitive) {
+										if (conditionNonTransitive.length() > 0) {
+											conditionNonTransitive.append(" and \n");
+										}
+										conditionNonTransitive.append("A." + e.a.name + "=B." + e.b.name);
+									}
+									if (condition.length() > 0) {
+										condition.append(" and \n");
+									}
+									condition.append("A." + e.a.name + "=B." + e.b.name);
+								}
 							}
-							if (sb.length() > 0) {
-								sb.append(" and \n");
-							}
-							sb.append("A." + e.a.name + "=B." + e.b.name);
 						}
 					}
 				}
-				if (hasNonTransientEquation) {
+				if (conditionNonTransitive.length() > 0) {
 					String name = ("AP" + (UUID.randomUUID().toString()));
-					Association association = new Association(pair.a, pair.b, false, false, sb.toString(), dataModel, false, null, "Association Proposer");
-					Association revAssociation = new Association(pair.b, pair.a, false, false, sb.toString(), dataModel, true, null, "Association Proposer");
+					Association association = new Association(pair.a, pair.b, false, false, conditionNonTransitive.toString(), dataModel, false, null, "Association Proposer");
+					Association revAssociation = new Association(pair.b, pair.a, false, false, conditionNonTransitive.toString(), dataModel, true, null, "Association Proposer");
 					association.setName(name);
 					association.reversalAssociation = revAssociation;
 					revAssociation.reversalAssociation = association;
 					addAssociation(name, pair, association, true);
+					if (!conditionNonTransitive.toString().equals(condition.toString())) {
+						name = ("AP" + (UUID.randomUUID().toString()));
+						association = new Association(pair.a, pair.b, false, false, condition.toString(), dataModel, false, null, "Association Proposer");
+						revAssociation = new Association(pair.b, pair.a, false, false, condition.toString(), dataModel, true, null, "Association Proposer");
+						association.setName(name);
+						association.reversalAssociation = revAssociation;
+						revAssociation.reversalAssociation = association;
+						addAssociation(name, pair, association, true);
+					}
 				}
 			}
 		}
@@ -819,7 +753,16 @@ public class AssociationProposer {
 	private final Map<Pair<net.sf.jailer.datamodel.Table, net.sf.jailer.datamodel.Table>, List<Association>> assocPerSourceDest
 		= new HashMap<Pair<net.sf.jailer.datamodel.Table, net.sf.jailer.datamodel.Table>, List<Association>>();
 	
-	private void addAssociation(String name, Pair<net.sf.jailer.datamodel.Table, net.sf.jailer.datamodel.Table> pair,
+	/**
+	 * Adds an association to the proposals list.
+	 * 
+	 * @param name name of association
+	 * @param pair (source, destination) table pair
+	 * @param association the association
+	 * @param check check if association is already known?
+	 * @return <code>true</code> if association was added
+	 */
+	public boolean addAssociation(String name, Pair<net.sf.jailer.datamodel.Table, net.sf.jailer.datamodel.Table> pair,
 			Association association, boolean check) {
 		List<Association> assocList = assocPerSourceDest.get(pair);
 		if (assocList == null) {
@@ -827,18 +770,19 @@ public class AssociationProposer {
 			assocPerSourceDest.put(pair, assocList);
 		}
 		if (check) {
-			Map<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column> mapping = association.createSourceToDestinationKeyMapping();
-			Map<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column> revMapping = association.reversalAssociation.createSourceToDestinationKeyMapping();
-			if (!mapping.isEmpty() && !revMapping.isEmpty()) {
-				for (Association other: assocList) {
-					Map<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column> otherMapping = other.createSourceToDestinationKeyMapping();
-					if (mapping.equals(otherMapping) || revMapping.equals(otherMapping)) {
-						if (fromDataModel.contains(other) && !knownAssociations.contains(other)) {
-							newKnownAssociations.add(association);
-							knownAssociations.add(other);
-						}
-						return;
+			Set<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>> mapping = new HashSet<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>>();
+			Set<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>> revMapping = new HashSet<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>>();
+			association.createSourceToDestinationKeyMapping(mapping);
+			association.createSourceToDestinationKeyMapping(revMapping);
+			for (Association other: assocList) {
+				Set<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>> otherMapping = new HashSet<Pair<net.sf.jailer.datamodel.Column, net.sf.jailer.datamodel.Column>>();
+				other.createSourceToDestinationKeyMapping(otherMapping);
+				if (mapping.equals(otherMapping) || revMapping.equals(otherMapping)) {
+					if (fromDataModel.contains(other) && !knownAssociations.contains(other)) {
+						newKnownAssociations.add(association);
+						knownAssociations.add(other);
 					}
+					return false;
 				}
 			}
 		}
@@ -847,6 +791,8 @@ public class AssociationProposer {
 		if (check) {
 			newAssociations.add(association);
 		}
+		
+		return true;
 	}
 
 	/**

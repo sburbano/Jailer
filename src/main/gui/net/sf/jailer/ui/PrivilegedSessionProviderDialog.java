@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -73,7 +73,7 @@ public class PrivilegedSessionProviderDialog extends javax.swing.JDialog {
 								);
 						final PrivilegedSessionProviderDialog dialog = new PrivilegedSessionProviderDialog(theParent);
 						ConnectionInfo ci = new ConnectionInfo();
-						final DbConnectionDialog connectionDialog = new DbConnectionDialog(theParent, JailerVersion.APPLICATION_NAME, infoBar, executionContext, true) {
+						final DbConnectionDialog connectionDialog = new DbConnectionDialog(theParent, JailerVersion.APPLICATION_NAME, infoBar, executionContext, true, false) {
 							@Override
 							protected boolean isAssignedToDataModel(String dataModelFolder) {
 								return true;
@@ -85,10 +85,10 @@ public class PrivilegedSessionProviderDialog extends javax.swing.JDialog {
 								dialog.setVisible(false);
 								if (ok) {	
 									try {
-										BasicDataSource dataSource = new BasicDataSource(info.driverClass,
+										BasicDataSource dataSource = UIUtil.createBasicDataSource(this, info.driverClass,
 												info.url, info.user,
 												info.password, 0, ClasspathUtil.toURLArray(info.jar1, info.jar2, info.jar3, info.jar4));
-										newSession.set(new Session(dataSource, dataSource.dbms));
+										newSession.set(new Session(dataSource, dataSource.dbms, executionContext.getIsolationLevel()));
 									} catch (Exception e) {
 										UIUtil.showException(theParent, "Error", e);
 									}

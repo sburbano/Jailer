@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 - 2018 the original author or authors.
+ * Copyright 2007 - 2019 Ralf Wisser.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ public abstract class NewTableBrowser extends javax.swing.JDialog {
         gridBagConstraints.anchor = java.awt.GridBagConstraints.WEST;
         gridBagConstraints.weightx = 0;
         gridBagConstraints.insets = new java.awt.Insets(6, 0, 4, 0);
-        jPanel2.add(StringSearchPanel.createSearchButton(parent, tableComboBox, "Open Table", new Runnable() {
+        jPanel2.add(StringSearchPanel.createSearchButton(this, tableComboBox, "Open Table", new Runnable() {
 			@Override
 			public void run() {
 				okButtonActionPerformed(null);
